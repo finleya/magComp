@@ -3,6 +3,7 @@
 
 Sys.setenv(TZ = "UTC")
 
+unlink("docs/.nojekyll")
 pkgdown::clean_site()
 source("dev/article-data/build_downloads.R", chdir = TRUE)
 
