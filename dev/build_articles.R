@@ -3,6 +3,7 @@
 
 Sys.setenv(TZ = "UTC")
 
+pkgdown::clean_site()
 source("dev/article-data/build_downloads.R", chdir = TRUE)
 
 pkgdown::init_site()
@@ -34,3 +35,6 @@ tryCatch({
 })
 
 pkgdown::build_search()
+
+# GitHub Pages serves these generated files without running Jekyll.
+file.create("docs/.nojekyll")

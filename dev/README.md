@@ -47,6 +47,24 @@ Articles execute their analyses when rendered; fitted models and predictions
 are not cached. Geometry preparation and optional population generation are
 separate steps described in each dataset README.
 
+## Website publication
+
+The `master` branch holds the package and article sources. The `gh-pages`
+branch holds only the generated website. In the repository's GitHub Pages
+settings, select **Deploy from a branch**, **gh-pages**, and **/(root)**.
+
+After building and reviewing `docs/index.html`, publish the site from the
+package root with:
+
+```sh
+bash dev/publish_site.sh
+```
+
+This requires Git, rsync, and push access to the repository. It updates the
+existing `gh-pages` branch using a temporary checkout. Publishing does not
+rerun the article analyses; rerun the website builder when their sources or
+the package change.
+
 ## Technical documentation
 
 The [technical document](modeling_and_software_details/magComp.tex) describes
