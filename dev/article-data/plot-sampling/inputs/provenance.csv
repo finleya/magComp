@@ -1,0 +1,5 @@
+input,source_path,source_md5,input_md5,preparation,prepared_date
+stands.gpkg,analysis/data/stands.gpkg,e29dfbfe8171f4af3bb24ea9df4b41ce,e29dfbfe8171f4af3bb24ea9df4b41ce,Copied unchanged,2026-10-21
+prediction_cells.gpkg,analysis/data/prediction_cells.gpkg,5b37b39a00357fdeab1f9691b1891ba4,5b37b39a00357fdeab1f9691b1891ba4,Copied unchanged,2026-10-21
+plots.csv,analysis/data/plots.csv,6959c5e7bbcf1aa1c96171186bd20d85,42dfec9bf9610ea3b41f90379ceaf611,"Selected location, area and p95 columns; no observed responses",2026-10-21
+cell_predictors.csv,analysis/data/cell_coverage.csv,d6975fdde5a21e097276721abdfa9678,38dc5ca4e19f533ff00bdce7ab6bcb57,"Selected location, area, p95 and coverage flag columns",2026-10-21

@@ -1,0 +1,49 @@
+url: https://finleya.github.io/magComp/
+
+template:
+  bootstrap: 5
+
+news:
+  cran_dates: false
+
+authors:
+  sidebar:
+    roles: [aut, cre, ctb]
+
+articles:
+  - title: Model and computation
+    desc: >-
+      Consult the [detailed technical document (PDF)](downloads/magComp.pdf)
+      as needed for model definitions, priors, sampler updates, and prediction.
+      The articles below introduce the models through worked examples.
+    contents:
+      - articles/modeling-and-software-details
+  - title: Fixed-area plot sampling
+    desc: >-
+      Begin with the shared simulated forest. The magnitude article estimates
+      overall tree density; the composition article estimates species shares
+      conditional on known totals. Combine magnitude and composition to
+      estimate DBH distributions, then species-by-DBH stand tables.
+      All five articles use the same downloadable population.
+    contents:
+      - articles/plot-sampling-data
+      - articles/magnitude-plot-sampling
+      - articles/composition-plot-sampling
+      - articles/dbh-plot-sampling
+      - articles/full-model-plot-sampling
+  - title: Group, spatial, and space-time effects
+    desc: >-
+      These articles extend the full model. Stratum effects
+      describe differences among groups of stands, first through intercepts
+      and then through canopy-height slopes. Spatial effects describe
+      continuous variation using distance between locations. A further example
+      adds effects to DBH allocation within species. The space-time article
+      combines repeated plot measurements across years. Each uses its own
+      simulated population in the same forest and provides the data needed
+      to run its code.
+    contents:
+      - articles/stratum-effects-plot-sampling
+      - articles/stratum-slopes-plot-sampling
+      - articles/spatial-effects-plot-sampling
+      - articles/conditional-dbh-effects-plot-sampling
+      - articles/space-time-effects-plot-sampling

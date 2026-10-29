@@ -1,0 +1,360 @@
+---
+title: "A simulated forest for plot-sampling examples"
+description: "Prepare the shared forest, simulate tree counts, and calculate known population quantities."
+resources:
+  - downloads/plot-sampling.zip
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-overflow: wrap
+    html-math-method: katex
+bibliography: references.bib
+link-citations: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+Sys.setenv(TZ = "UTC")
+
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE,
+                      fig.width = 7, fig.height = 5)
+data_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)),
+                                    "../../dev/article-data/plot-sampling"))
+knitr::read_chunk(file.path(data_dir, "simulate_population.R"))
+knitr::read_chunk(file.path(data_dir, "prepare_data.R"))
+knitr::opts_knit$set(root.dir = data_dir)
+```
+
+This article constructs a simulated forest population for the plot-sampling
+examples. We use real forest boundaries and plot locations from Weisse Krug
+in Germany, together with canopy-height measurements derived from UAV-based
+LiDAR [@spitta2026lidar].[^uav-data] We simulate tree counts for three species and five
+diameter classes using the magnitude-composition model [@finley2026magcompmodel]
+to illustrate estimation of tree density, species composition, and stand tables.
+
+[^uav-data]: We thank Kai Jütte for initiating and supporting the Weisse Krug study.
+    OGF GmbH acquired and provided the UAV laser scanning data used in the
+    forestry examples on behalf of the State Forestry Agency of
+    Mecklenburg–West Pomerania.
+
+The magnitude, composition, DBH, and species-by-DBH articles use this same population.
+The plot table contains the observations used for fitting. The prediction
+table covers the forest and also contains simulated counts, giving us known
+quantities against which to assess predictions.
+
+::: {.alert .alert-info role="note"}
+**Example data**
+
+[Download the plot-sampling data (ZIP)](downloads/plot-sampling.zip){.btn .btn-primary download="plot-sampling.zip"}
+
+The introductory plot-sampling articles use this same archive.
+Extract it and use the folder containing `data/` as your R working directory.
+The download includes the simulated counts, ready for fitting. The generation
+code below shows how to reproduce them; you can also proceed directly to the
+[magnitude article](magnitude-plot-sampling.html).
+:::
+
+## Forest, plots, and prediction cells
+
+The forest comprises 249 stands. Its 151 field plots are circles of radius
+20 m, clipped to the forest boundary where necessary. The prediction grid
+contains 4,812 square cells, also clipped to the forest boundary. A full cell
+has the area of a full plot, approximately 0.126 ha, and a side length of
+35.45 m. At each plot and prediction cell, p95 is the 95th percentile of
+canopy-height model values within its forested area, measured in meters.
+
+We begin by reading the forest polygon and the plot and prediction tables.
+We also calculate the forest area with `st_area()`, converting square meters
+to hectares.
+
+```{r}
+#| label: read-data
+```
+
+The forest covers `r round(forest_area_ha, 1)` ha. The `area` column
+in each table gives the forested area of that plot or cell in hectares.
+
+We map p95 across the prediction cells and add the plot locations.
+
+```{r}
+#| label: fig-forest-map
+#| fig-height: 7
+#| fig-cap: "Canopy-height predictor p95 across the forest. White circles mark the 151 plot locations. The colored cells are the locations used for forest prediction."
+
+prediction_cells <- st_read("data/prediction_cells.gpkg", quiet = TRUE) |>
+  inner_join(prediction |> select(plot_id, p95), by = "plot_id")
+
+plot_locations <- st_as_sf(plots, coords = c("easting", "northing"),
+                           crs = st_crs(forest))
+
+ggplot() +
+  geom_sf(data = prediction_cells, aes(fill = p95), color = NA) +
+  geom_sf(data = forest, fill = NA, color = "grey30", linewidth = 0.3) +
+  geom_sf(data = plot_locations, shape = 21, fill = "white", color = "black",
+          size = 1.5, stroke = 0.3) +
+  scale_fill_viridis_c(name = "p95 (m)") +
+  coord_sf(datum = NA) +
+  theme_void() +
+  theme(legend.position = "right")
+```
+
+Canopy height varies across the forest. We use it as a predictor in each
+model component, with separate coefficients for overall density, species
+allocation, and diameter allocation within species.
+
+## Generate tree counts
+
+### Standardize canopy height
+
+We standardize p95 using the plots' mean and standard deviation, applying
+those same values to the prediction cells. The resulting predictor `x`
+has mean zero and standard deviation one among the plots. Centering makes
+the intercept refer to average canopy height, and scaling expresses the
+slope per one-standard-deviation increase. It can also help numerical
+stability during fitting. We combine plots and prediction locations to
+generate all counts together.
+
+```{r}
+#| label: scale-predictor
+```
+
+### Overall tree density
+
+For a unit with forested area $a_i$ hectares, expected tree density $M_i$
+and total count $N_i$ follow
+
+$$
+\log M_i = \beta_0 + \beta_1 x_i, \qquad
+N_i \mid M_i,r_M \sim \operatorname{NB}(a_i M_i,r_M).
+$$
+
+The negative-binomial mean is $a_i M_i$, and $r_M$ is its size parameter.
+For the simulated population, we set $\beta_0 = \log(350)$,
+$\beta_1 = -0.2$, and $r_M = 50$. Expected density is therefore 350 trees/ha
+at average plot p95. A one-standard-deviation increase in p95 multiplies
+this density by $\exp(-0.2)$, about 0.82, an 18% decrease. We use these
+parameter values to calculate expected densities and simulate counts at
+all plot and prediction locations.
+
+```{r}
+#| label: magnitude
+```
+
+`expected_density` is the mean density specified by the model; `count` is
+one simulated total count for that area. The realized density `count / area`
+varies around the expected density. We plot the simulated plot densities
+against p95, with the generating mean shown as a line.
+
+```{r}
+#| label: fig-plot-counts
+#| fig-cap: "Simulated plot densities and their relationship with canopy height. The black line shows the generating expected density."
+
+relationship <- tibble(p95 = seq(min(plots$p95), max(plots$p95), length.out = 100)) |>
+  mutate(expected_density = exp(beta_0 + beta_1 * (p95 - p95_mean) / p95_sd))
+
+locations |>
+  filter(dataset == "plot") |>
+  ggplot(aes(p95, count / area)) +
+  geom_point(alpha = 0.6, color = "#31688E") +
+  geom_line(data = relationship, aes(y = expected_density), color = "black") +
+  labs(x = "p95 canopy height (m)", y = "Trees per hectare") +
+  theme_bw()
+```
+
+### Species allocation
+
+We allocate the total among pine, oak, and birch using sequential probit
+probabilities. Pine is allocated first. Oak is allocated among the trees
+remaining after pine, and birch receives the rest. These binomial draws
+together produce a multinomial allocation of the total count.
+
+<details>
+<summary>Species allocation code</summary>
+
+```{r}
+#| label: species
+```
+
+</details>
+
+The positive pine slope increases its share as p95 increases. The negative
+oak slope decreases its share of the trees remaining after pine. The three
+species counts always sum to the total count at that location.
+
+### DBH allocation within species
+
+We next allocate each species' trees among five diameter-at-breast-height
+(DBH) classes. Each class includes its lower boundary and excludes its upper
+boundary; `50+` includes all diameters at least 50 cm. Thus, all simulated
+trees have DBH of at least 10 cm.
+
+Each species has its own intercepts and slopes. As with species allocation,
+we draw counts for successive classes from the trees remaining, with the
+largest class receiving the remainder.
+
+<details>
+<summary>DBH allocation code</summary>
+
+```{r}
+#| label: dbh
+```
+
+</details>
+
+There are 15 species-by-DBH categories. Their counts sum to the total at
+each location. There are no spatial or group effects, and the DBH-class
+coefficients are specified directly without a smoothing model. Expected
+densities and allocations vary with p95.
+
+### Save the simulated population
+
+We separate the plots and prediction cells and save their counts alongside
+their areas, coordinates, and predictors.
+
+```{r}
+#| label: save-population
+```
+
+## Known forest quantities
+
+We calculate forest density by averaging the simulated cell densities,
+weighted by their areas. Boundary cells contribute less because they cover
+less land. This gives a grid approximation to forest density in trees/ha.
+Multiplying that density by the polygon's forest area gives the corresponding
+forest total. The same calculation applies to each species-by-DBH category.
+
+```{r}
+#| label: forest-truth
+```
+
+The simulated forest density is **`r round(forest_density, 1)` trees/ha**,
+corresponding to approximately **`r format(round(forest_total), big.mark = ",", scientific = FALSE)`
+trees** over the forest area. These reference quantities come from the
+simulated counts, including their count variation.
+
+We arrange the category densities as a stand table, with DBH classes in rows
+and species in columns.
+
+```{r}
+#| label: forest-table
+
+forest_table |>
+  select(species, dbh_class, density) |>
+  pivot_wider(names_from = species, values_from = density) |>
+  mutate(dbh_class = factor(dbh_class, levels = dbh_classes)) |>
+  arrange(dbh_class) |>
+  select(dbh_class, pine, oak, birch) |>
+  knitr::kable(digits = 1, col.names = c("DBH class (cm)", "Pine", "Oak", "Birch"))
+```
+
+When fitting the models, we will repeat this aggregation for each joint
+posterior predictive draw. Summaries of those aggregated draws provide
+forest estimates and intervals that we can compare with these known values.
+
+## Cell areas within stands
+
+To summarize predictions for stands or other polygon areas of interest, we
+pass the posterior predictive samples stored in the object returned by
+`predict()` to `standSummary()`, which handles the area-weighted aggregation.
+
+Because some prediction cells cross stand boundaries, we need the area of
+each cell within each stand. Each cell has one set of density draws, but its
+contribution to a stand depends on how much of the cell lies within that
+stand. For example, a hypothetical 0.12-ha cell split between two stands
+would have two rows in the area table.
+
+| `prediction_id` | `stand_id` | `area_ha` |
+|:--|:--|--:|
+| 1 | A | 0.08 |
+| 1 | B | 0.04 |
+
+Both rows use the same density draw for cell 1. If that draw is 300 trees/ha,
+the cell contributes $300 \times 0.08 = 24$ trees to stand A's total and
+$300 \times 0.04 = 12$ trees to stand B's total. For each draw,
+`standSummary()` adds the contributions from all cells overlapping a stand
+and divides by their summed area to obtain stand density. Repeating this
+calculation across draws gives a distribution from which we calculate the
+stand estimate and interval. This treats density as constant within each
+prediction cell.
+
+We construct the area table for our forest by intersecting the cell and stand
+polygons and calculating the intersection areas in hectares.
+
+```{r}
+#| label: read-stand-polygons
+
+stands <- st_read("data/stands.gpkg", quiet = TRUE)
+
+cells <- st_read("data/prediction_cells.gpkg", quiet = TRUE)
+```
+
+```{r}
+#| label: cell-stand-areas
+```
+
+The saved table has one row per cell–stand intersection. `prediction_id`
+matches the cell's `plot_id` in the prediction table, `stand_id` identifies
+the stand, and `area_ha` gives the area of that cell within that stand.
+A cell crossing a boundary appears in more than one row. Cell 248, for
+example, contributes to two stands.
+
+```{r}
+#| label: preview-stand-areas
+
+cell_stand_areas |>
+  filter(prediction_id == 248) |>
+  knitr::kable(digits = 4)
+```
+
+We save this table once and reuse it with `standSummary()` in the later
+modeling articles.
+
+## Shared data files
+
+The data bundle contains:
+
+| File | Contents |
+|:--|:--|
+| `forest.gpkg` | The forest polygon, used for mapping and forest area. |
+| `plot_locations.gpkg` | The original plot centers, ready to use in maps. |
+| `stands.gpkg` | The 249 stand boundaries, stand IDs, areas in hectares, and stratum labels for the later example. |
+| `plots.csv` | The 151 plot locations, stand IDs, predictors, areas, and simulated counts. |
+| `prediction.csv` | The 4,812 prediction locations, stand IDs, predictors, areas, and simulated counts. |
+| `prediction_cells.gpkg` | The prediction-cell polygons, linked to `prediction.csv` by `plot_id`. |
+| `cell_stand_areas.csv` | The area of each prediction cell within each stand, for later stand summaries. |
+
+Both location tables and the prediction-cell polygons use numeric `plot_id`
+identifiers. The overlap table calls the same cell IDs `prediction_id`.
+
+The `stand_id` column links locations to stand polygons. Cells that cross
+stand boundaries have a separate overlap area for each stand in
+`cell_stand_areas.csv`, allowing their predicted densities to contribute to
+each stand they cover.
+
+Both CSVs contain total count `count` and 15 category-count columns, such as
+`pine:10-20`. The magnitude example uses total counts. The composition example
+sums DBH-class counts within species and conditions on the totals. The DBH
+example sums over species within each diameter class; the species-by-DBH
+model uses all 15 categories. Prediction-cell counts provide known values for
+assessment and are excluded from fitting.
+
+We inspect the first few plots, showing total counts and the 10--20 cm counts
+for each species.
+
+```{r}
+#| label: preview-data
+
+plots |>
+  select(plot_id, area, p95, x, count, `pine:10-20`, `oak:10-20`, `birch:10-20`) |>
+  head() |>
+  knitr::kable(digits = 3)
+```
+
+We next fit a [magnitude model](magnitude-plot-sampling.html) to estimate
+forest and stand tree densities from the sampled plots.
+
+## References

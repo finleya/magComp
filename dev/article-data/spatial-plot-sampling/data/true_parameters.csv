@@ -1,0 +1,12 @@
+component,block,parameter,index,truth
+magnitude,,coefficients,(Intercept),5.857933154483459
+magnitude,,coefficients,x,-0.2
+magnitude,,variance,,0.25
+magnitude,,phi,,3
+composition,species,coefficients,pine:(Intercept),0
+composition,species,coefficients,pine:x,0.5
+composition,species,coefficients,oak:(Intercept),-0.5
+composition,species,coefficients,oak:x,-0.5
+composition,species,loadings,pine:pine,0.7
+composition,species,loadings,oak:pine,-0.5
+composition,species,phi,pine,5

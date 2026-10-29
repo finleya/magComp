@@ -1,0 +1,678 @@
+---
+title: "Stratum effects on tree density and species composition"
+description: "Add stratum effects, examine combined intercepts, and summarize forest and stand predictions."
+resources:
+  - downloads/stratum-plot-sampling.zip
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-overflow: wrap
+    html-math-method: katex
+bibliography: references.bib
+link-citations: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+Sys.setenv(TZ = "UTC")
+
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE,
+                      fig.width = 7, fig.height = 4)
+data_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)),
+                                    "../../dev/article-data/plot-sampling"))
+knitr::read_chunk(file.path(data_dir, "../stratum-plot-sampling/simulate_population.R"))
+knitr::opts_knit$set(root.dir = data_dir)
+```
+
+Stands with similar soils, management histories, or forest types may differ
+in tree density and species composition even after accounting for canopy
+height. We represent such groups as strata and extend the
+[full plot-sampling model](full-model-plot-sampling.html) with a magnitude
+random intercept and a species factor effect for each stratum.
+
+We use three groups of stands to generate a new population. We then fit
+the model, check the chains, and compare combined intercepts by stratum with
+their generating values in a table and maps. Finally, we
+predict across the forest and compare forest, stratum, and stand
+species-by-DBH densities with truth.
+The canopy-height slopes and the DBH allocation models remain the same
+across strata.
+
+::: {.alert .alert-info role="note"}
+**Example data**
+
+[Download the stratum-example data (ZIP)](downloads/stratum-plot-sampling.zip){.btn .btn-primary download="stratum-plot-sampling.zip"}
+
+This archive contains the prepared locations and polygons for this example.
+Extract it and use the folder containing `data/` as your R working directory.
+We generate the stratum effects and tree counts below.
+:::
+
+## Read the prepared data
+
+We created three strata of 83 stands each for this example, using the
+stand boundaries and canopy heights from the shared inventory data. We read the
+prepared locations, which already have `stratum_id`, sampled areas, and
+canopy-height predictors, along with the forest, stands, and plot locations
+for mapping.
+
+```{r}
+#| label: read-spatial-data
+```
+
+The `dataset` column identifies observed plot units and prediction units.
+Units crossing stratum boundaries have been divided into portions, each
+with its own `plot_id`, area, and stratum. We simulate counts separately for
+each portion. Applying this construction to field data would require counts
+recorded by portion. The predictor `x` uses the same
+standardization as in the [data article](plot-sampling-data.html).
+
+We map the strata and the 151 sampled plot locations.
+
+```{r}
+#| label: fig-strata
+#| fig-height: 7
+#| fig-cap: "Three strata formed from groups of stands. White circles mark sampled plot locations."
+
+ggplot() +
+  geom_sf(data = stands, aes(fill = factor(stratum_id)), color = NA) +
+  geom_sf(data = forest, fill = NA, color = "grey30", linewidth = 0.3) +
+  geom_sf(data = plot_centers, shape = 21, fill = "white", size = 1.5,
+          stroke = 0.3) +
+  scale_fill_manual(values = c("#009E73", "#E69F00", "#56B4E9"),
+                    name = "Stratum") +
+  coord_sf(datum = NA) +
+  theme_void()
+```
+
+## Generate a population with stratum effects
+
+### Magnitude and species models
+
+For observed unit $i$, let $a_i$ be its area in hectares, $x_i$ its
+standardized canopy height, and $g(i)$ its stratum. The magnitude model is
+
+$$
+\log M_i=\beta_0+\beta_1x_i+\delta_{g(i)},\qquad
+\delta_g\sim\operatorname{N}(0,\sigma_\delta^2),\qquad
+N_i\mid M_i,r_M\sim\operatorname{NB}(a_iM_i,r_M).
+$$
+
+Here $M_i$ is expected tree density in trees/ha, $N_i$ is total count, and
+$r_M$ is negative-binomial size. The combined intercept
+$\beta_0+\delta_g$ gives log expected density in stratum $g$ at average
+plot canopy height. The stratum effect multiplies expected density by
+$\exp(\delta_g)$ at a given canopy height; the canopy-height slope $\beta_1$
+is shared across strata.
+
+Species allocation proceeds through pine, then oak, with birch receiving
+the remaining trees. For allocation step $j$, its conditional probability is
+
+$$
+\pi_{ij}=\Phi(\alpha_{0j}+\alpha_{1j}x_i+\gamma_j u_{g(i)}),
+\qquad u_g\sim\operatorname{N}(0,1),
+$$
+
+where $\Phi$ is the standard Normal distribution function, implemented by
+`pnorm()`. Each stratum has one factor score $u_g$, shared by the two
+allocation steps. The loadings $\gamma_j$ determine how that score changes
+each step. Pine is the anchor, so its loading is positive; oak's loading
+can have either sign. Fixing the factor variance at one allows the
+loadings to determine the amount of variation among strata.
+
+For this population, we use $\beta_0=\log(350)$, $\beta_1=-0.2$,
+$\sigma_\delta=0.5$, and $r_M=1000$. The simpler examples used $r_M=50$
+and estimated it during fitting. Here we fix size at its generating value
+because magComp does not estimate it alongside magnitude random effects.
+The species intercepts and slopes match the earlier articles. Loadings of
+0.7 for pine and $-0.5$ for oak
+make a larger factor score favor pine allocation and reduce oak allocation
+among the remaining trees. Birch has no separate allocation coefficient.
+
+We draw each stratum's magnitude effect and species score once, then use
+them for all its observed and prediction units. The magnitude effects and
+species scores are independent in this model. Their generating distributions
+have mean zero, but the three realized effects need not average to zero.
+
+```{r}
+#| label: stratum-effects
+```
+
+### Simulate counts and allocations
+
+We calculate expected density with the stratum effect included, then draw
+total counts using each unit's area.
+
+```{r}
+#| label: magnitude-counts
+```
+
+We allocate the counts to species using the stratum-specific probabilities.
+
+```{r}
+#| label: species-counts
+```
+
+Within each species, we allocate trees among the five DBH classes using
+the same regressions as in the data article. These conditional DBH models
+have no stratum effects or smoothing across classes. The code below
+completes the population and keeps all 15 counts for every unit.
+
+<details>
+<summary>DBH allocation code</summary>
+
+```{r}
+#| label: dbh-counts
+```
+
+</details>
+
+We separate the plots used for fitting from the prediction units used
+to assess forest estimates.
+
+```{r}
+#| label: split-population
+```
+
+## Fit the stratum model
+
+We arrange the observed counts into one row per unit, species, and DBH
+class. The category ordering matches the allocation sequence used above.
+
+```{r}
+#| label: model-data
+
+library(magComp)
+
+species_order <- c("pine", "oak", "birch")
+
+trees <- plots |>
+  select(plot_id, stratum_id, area, x, contains(":")) |>
+  pivot_longer(contains(":"), names_to = c("species", "dbh_class"),
+               names_sep = ":", values_to = "count") |>
+  mutate(
+    species = factor(species, levels = species_order),
+    dbh_class = ordered(dbh_class, levels = dbh_classes)
+  ) |>
+  arrange(plot_id, species, dbh_class)
+
+dat <- magCompData(
+  trees,
+  unit = plot_id, categories = c(species, dbh_class),
+  tree_count = count, design = fixedArea(area)
+)
+```
+
+`iid()` adds the magnitude random intercept. `factor_iid()` adds the
+shared species factor, with `K = 1` specifying one score per stratum.
+The term names identify their samples in the fitted object.
+
+```{r}
+#| label: fit
+
+fit <- magComp(
+  dat,
+  magnitude = ~ x + iid(stratum_id, name = "stratum_intercept"),
+  composition = magCompComposition(
+    species ~ x + factor_iid(stratum_id, K = 1, anchors = "pine",
+                             name = "stratum_intercept"),
+    dbh_class | species ~ x
+  ),
+  control = magCompControl(
+    n_samples = 4000,
+    n_burn = 1000,
+    n_chains = 3,
+    n_cores = 3,
+    chain_seeds = 1:3,
+    nb_size = 1000,
+    verbose = FALSE
+  )
+)
+```
+
+We retain automatic starting values and default priors. The magnitude
+random-effect variance and species loadings are estimated. Each of three
+chains contributes 3,000 retained draws after discarding 1,000 burn-in iterations.
+
+The group effects share a distribution, which lets information from other
+strata help estimate each effect. This is often called partial pooling.
+Here only three strata inform the between-stratum variation, even though
+there are many observed units within them.
+
+## Check the chains
+
+We begin with `summary(fit)` and add the generating values for comparison.
+The table focuses on the magnitude and species parameters; the complete
+summary also includes the DBH coefficients. R-hat values near one indicate
+agreement among chains. ESS is the effective sample size after accounting
+for dependence among draws.
+
+```{r}
+#| label: separate-parameters
+
+parameter_summary <- summary(fit)
+
+true_parameters <- tribble(
+  ~component,    ~parameter,      ~index,              ~truth,
+  "magnitude",   "coefficients",  "(Intercept)",       beta_0,
+  "magnitude",   "coefficients",  "x",                 beta_1,
+  "magnitude",   "variance",      "",                  sigma_delta^2,
+  "composition", "coefficients",  "pine:(Intercept)",  alpha_pine[1],
+  "composition", "coefficients",  "pine:x",            alpha_pine[2],
+  "composition", "coefficients",  "oak:(Intercept)",   alpha_oak[1],
+  "composition", "coefficients",  "oak:x",             alpha_oak[2],
+  "composition", "loadings",      "pine:pine",         gamma_pine,
+  "composition", "loadings",      "oak:pine",          gamma_oak
+)
+
+main_parameters <- parameter_summary |>
+  filter(component == "magnitude" | block == "species") |>
+  left_join(true_parameters, by = c("component", "parameter", "index"))
+
+main_parameters |>
+  select(symbol, truth, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(digits = 3,
+               col.names = c("Parameter", "Truth", "Mean", "2.5%", "97.5%", "R-hat", "ESS"))
+```
+
+The canopy-height slopes have R-hats near one. The magnitude intercept,
+however, has an R-hat of 1.429 and a small ESS. The species intercepts and
+loadings also mix slowly, as indicated by R-hats of 1.225 and 1.209 for
+the pine and oak intercepts and 1.175 and 1.157 for their respective loadings.
+
+An overall intercept and its random effects can trade off while leaving
+fitted values nearly unchanged. For magnitude, an increase in $\beta_0$
+can be offset by decreases in the $\delta_g$, keeping the combined
+intercepts $\beta_0+\delta_g$ similar. The species models have an analogous
+sum, $\alpha_{0j}+\gamma_j u_g$. The counts inform these sums more directly
+than their separate components, especially with only three strata.
+
+We use `samples(fit, type = "combined")` to add each regression coefficient
+to its random effects within matching posterior draws and chains. For
+species, this includes multiplying loadings by factor scores. Setting
+`group = ".all"` averages these combined coefficients across fitted units,
+so the diagnostic describes an average rather than an individual stratum.
+
+```{r}
+#| label: diagnostics
+
+diagnostics <- samples(fit, type = "combined", group = ".all")
+
+summary(diagnostics) |>
+  transmute(quantity = if_else(component == "magnitude", "Magnitude",
+                                paste(str_to_title(stick), "allocation")),
+            rhat, ess) |>
+  knitr::kable(digits = 3,
+               col.names = c("Quantity", "R-hat", "ESS"))
+```
+
+The combined intercepts have R-hats close to one and much larger ESS.
+In trace plots, this tradeoff can appear as separate intercept chains
+moving slowly or staying at different levels, while the combined intercept
+chains overlap and move through similar values. `plot(fit, parameters = "(Intercept)")`
+shows the magnitude intercept chains, and `plot(diagnostics)` shows the combined chains.
+
+The improved diagnostics apply specifically to the combined intercepts.
+
+## Estimate and map combined intercepts by stratum
+
+We now estimate each stratum's combined intercept and compare it with truth.
+
+`summary()` uses the same sample extraction and combination as above.
+With `group = "stratum_id"`, it averages within each stratum. Here each
+stratum shares one combined intercept, so this returns its posterior mean,
+95% credible interval, and chain diagnostics directly. The table includes
+R-hat and ESS for each stratum's combined intercept.
+
+```{r}
+#| label: intercept-estimates
+
+intercept_summary <- summary(fit, type = "combined", group = "stratum_id") |>
+  mutate(component = if_else(component == "magnitude", "Magnitude",
+                              str_to_title(stick))) |>
+  rename(stratum_id = group) |>
+  left_join(true_intercepts, by = c("component", "stratum_id"))
+
+intercept_summary |>
+  select(component, stratum_id, truth, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(digits = 3,
+               col.names = c("Component", "Stratum", "Truth", "Mean",
+                             "2.5%", "97.5%", "R-hat", "ESS"))
+```
+
+Combined magnitude intercepts are on the log-density scale. Applying `exp()`
+gives expected trees/ha at average plot canopy height. Combined species
+intercepts are on the probit scale. Applying `pnorm()` gives pine's allocation
+probability or oak's probability among the non-pine trees at that same canopy
+height. To summarize densities or probabilities, apply these transformations
+to each posterior draw before calculating means and intervals. The combined
+intercept estimates closely match their generating values in this example.
+
+We join the combined intercepts to stands through `stratum_id` and map truth
+beside the posterior mean. Truth and estimates use the same color scale within
+each figure. Stands in the same stratum share a combined intercept; their
+densities and allocations still vary with canopy height.
+
+```{r}
+#| label: intercept-map-data
+
+map_values <- intercept_summary |>
+  select(stratum_id, component, Truth = truth, Estimate = mean) |>
+  pivot_longer(c(Truth, Estimate), names_to = "source", values_to = "intercept") |>
+  mutate(
+    component = factor(component, levels = c("Magnitude", "Pine", "Oak")),
+    source = factor(source, levels = c("Truth", "Estimate"))
+  )
+
+intercept_maps <- stands |>
+  left_join(map_values, by = "stratum_id", relationship = "many-to-many")
+```
+
+```{r}
+#| label: fig-magnitude-intercepts
+#| fig-height: 5
+#| fig-cap: "True and estimated combined magnitude intercepts by stratum, shown on the log-density scale."
+
+ggplot(filter(intercept_maps, component == "Magnitude")) +
+  geom_sf(aes(fill = intercept), color = NA) +
+  facet_wrap(~ source, nrow = 1) +
+  scale_fill_viridis_c(name = "Combined\nintercept\n(log-density)") +
+  coord_sf(datum = NA) +
+  theme_void()
+```
+
+```{r}
+#| label: fig-species-intercepts
+#| fig-height: 8
+#| fig-cap: "True and estimated combined species allocation intercepts by stratum, shown on a common probit scale. Oak allocation is conditional on a tree not being pine."
+
+ggplot(filter(intercept_maps, component %in% c("Pine", "Oak"))) +
+  geom_sf(aes(fill = intercept), color = NA) +
+  facet_grid(component ~ source) +
+  scale_fill_viridis_c(name = "Combined\nintercept\n(probit)") +
+  coord_sf(datum = NA) +
+  theme_void()
+```
+
+The maps show differences among strata without a spatial random effect.
+The model uses stratum membership, not distance between stands, to share
+information. The table provides uncertainty that is not shown in the maps.
+
+## Predict and summarize the forest
+
+All prediction units belong to strata represented in the fit. Within each
+posterior draw, `predict()` uses the sampled effect for that stratum,
+generates a total count, and allocates it among species and DBH classes.
+`type = "density"` divides these counts by each unit's area.
+
+```{r}
+#| label: predict
+
+predictions <- predict(
+  fit,
+  prediction |> select(plot_id, stratum_id, x, area),
+  type = "density",
+  target = "observation",
+  n_draws = 100,
+  summary = "samples"
+)
+
+forest_predictions <- standSummary(
+  predictions,
+  data = prediction,
+  unit = plot_id,
+  represented_area = area,
+  summary = "samples"
+)
+
+forest_summary <- summary(forest_predictions)
+```
+
+As in the full-model article, `standSummary()` averages densities using unit
+areas within each draw. Stratum effects are already included in the predictions.
+The 100 draws per chain give 300 forest draws, which we summarize and compare
+with the simulated forest densities.
+
+```{r}
+#| label: forest-comparison
+
+forest_truth <- prediction |>
+  select(contains(":")) |>
+  pivot_longer(everything(), names_to = c("species", "dbh_class"),
+               names_sep = ":", values_to = "count") |>
+  group_by(species, dbh_class) |>
+  summarise(truth = sum(count) / sum(prediction$area), .groups = "drop")
+
+comparison <- forest_summary |>
+  as_tibble() |>
+  separate_wider_delim(category, delim = ":", names = c("species", "dbh_class")) |>
+  left_join(forest_truth, by = c("species", "dbh_class")) |>
+  mutate(
+    species = factor(species, levels = species_order),
+    dbh_class = ordered(dbh_class, levels = dbh_classes)
+  )
+```
+
+```{r}
+#| label: fig-forest-distributions
+#| fig-cap: "Forest species-by-DBH densities. Blue points and bars show posterior predictive means and 95% intervals; black horizontal marks show simulated truth."
+
+ggplot(comparison, aes(dbh_class, mean)) +
+  geom_errorbar(aes(ymin = q2_5, ymax = q97_5), width = 0.15,
+                color = "#0072B2") +
+  geom_point(aes(shape = "Estimate"), color = "#0072B2", size = 2.5) +
+  geom_point(aes(y = truth, shape = "Truth"), size = 6) +
+  scale_shape_manual(values = c("Truth" = 95, "Estimate" = 16),
+                     breaks = c("Truth", "Estimate"), name = NULL) +
+  facet_wrap(~ species, nrow = 1) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "DBH class (cm)", y = "Trees per hectare") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+The estimates reproduce pine's relatively broad DBH distribution and the
+greater concentration of oak and birch in the smaller classes.
+These forest estimates combine the stratum-specific relationships with
+canopy height and area across the prediction grid.
+
+## Summarize predictions by stratum
+
+Each prediction unit belongs to one stratum. Adding `group = stratum_id`
+to the same `standSummary()` call gives species-by-DBH densities for each
+stratum from the existing prediction draws.
+
+```{r}
+#| label: stratum-summary
+
+stratum_predictions <- standSummary(
+  predictions,
+  data = prediction,
+  unit = plot_id,
+  group = stratum_id,
+  represented_area = area,
+  summary = "samples"
+)
+```
+
+We calculate each stratum's true densities by dividing its simulated counts
+by the summed area of its prediction units, then compare them with estimates
+and intervals.
+
+```{r}
+#| label: stratum-comparison
+
+stratum_truth <- prediction |>
+  select(stratum_id, area, contains(":")) |>
+  pivot_longer(contains(":"), names_to = "category", values_to = "count") |>
+  group_by(stratum_id, category) |>
+  summarise(truth = sum(count) / sum(area), .groups = "drop")
+
+stratum_comparison <- summary(stratum_predictions) |>
+  as_tibble() |>
+  mutate(stratum_id = as.integer(unit), stratum = paste("Stratum", stratum_id)) |>
+  left_join(stratum_truth, by = c("stratum_id", "category"))
+```
+
+```{r}
+#| label: fig-stratum-densities
+#| fig-height: 4
+#| fig-cap: "Estimated versus true species-by-DBH densities within each stratum. Each point represents one species-by-DBH category; bars show 95% posterior predictive intervals. Dashed lines mark equality."
+
+density_limits <- c(0, max(stratum_comparison$truth, stratum_comparison$q97_5))
+
+ggplot(stratum_comparison, aes(truth, mean)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50") +
+  geom_errorbar(aes(ymin = q2_5, ymax = q97_5), width = 0,
+                color = "#0072B2", alpha = 0.5) +
+  geom_point(color = "#0072B2", size = 2) +
+  facet_wrap(~ stratum, nrow = 1) +
+  coord_equal(xlim = density_limits, ylim = density_limits) +
+  labs(x = "True density (trees/ha)", y = "Estimated density (trees/ha)") +
+  theme_minimal()
+```
+
+## Summarize predictions by stand
+
+Some prediction units span several stands within a stratum. Following the
+[data article](plot-sampling-data.html#cell-areas-within-stands), we calculate
+their areas within stands using this example's prediction-unit polygons and IDs.
+
+```{r}
+#| label: stand-overlap-areas
+
+prediction_units <- st_read(
+  "data/stratum_prediction_units.gpkg", quiet = TRUE
+)
+
+# IDs remain labels when polygons are divided into overlapping parts.
+st_agr(prediction_units) <- "constant"
+st_agr(stands) <- "constant"
+
+unit_stand_areas <- st_intersection(
+  prediction_units |> select(plot_id),
+  stands |> select(stand_id)
+)
+
+unit_stand_areas$area_ha <- as.numeric(st_area(unit_stand_areas)) / 10000
+
+unit_stand_areas <- unit_stand_areas |>
+  st_drop_geometry() |>
+  as_tibble() |>
+  filter(area_ha > 0) |>
+  arrange(plot_id, stand_id)
+
+# Prediction unit 72 overlaps two stands.
+unit_stand_areas |>
+  filter(plot_id == 72) |>
+  knitr::kable(digits = 4)
+```
+
+We pass these overlap areas to `standSummary()` with `group = stand_id`.
+Each unit's density draw is reused in every stand it overlaps, weighted by
+the overlap area. This gives species-by-DBH densities and 95% posterior
+predictive intervals for all 249 stands.
+
+```{r}
+#| label: stand-summary
+
+stand_predictions <- standSummary(
+  predictions,
+  data = unit_stand_areas,
+  unit = plot_id,
+  group = stand_id,
+  represented_area = area_ha,
+  summary = "samples"
+)
+
+stand_summary <- summary(stand_predictions)
+```
+
+We calculate truth from the simulated category counts divided by unit area,
+using the same overlap weights and constant density within each unit.
+
+```{r}
+#| label: stand-comparison
+
+unit_truth <- prediction |>
+  select(plot_id, area, contains(":")) |>
+  pivot_longer(contains(":"), names_to = "category", values_to = "count") |>
+  mutate(density = count / area) |>
+  select(plot_id, category, density)
+
+stand_truth <- unit_stand_areas |>
+  left_join(unit_truth, by = "plot_id", relationship = "many-to-many") |>
+  group_by(stand_id, category) |>
+  summarise(truth = weighted.mean(density, area_ha), .groups = "drop")
+
+stand_comparison <- stand_summary |>
+  as_tibble() |>
+  rename(stand_id = unit) |>
+  left_join(stand_truth, by = c("stand_id", "category")) |>
+  separate_wider_delim(category, delim = ":", names = c("species", "dbh_class")) |>
+  mutate(
+    species = factor(species, levels = species_order),
+    dbh_class = ordered(dbh_class, levels = dbh_classes)
+  )
+```
+
+We show all 15 species-by-DBH categories for one stand, with truth alongside
+the estimates and intervals. Change `example_stand` to inspect another stand.
+
+```{r}
+#| label: example-stand
+
+example_stand <- first(stand_comparison$stand_id)
+
+stand_comparison |>
+  filter(stand_id == example_stand) |>
+  arrange(species, dbh_class) |>
+  select(species, dbh_class, truth, mean, q2_5, q97_5) |>
+  knitr::kable(digits = 2,
+               col.names = c("Species", "DBH class", "Truth", "Mean", "2.5%", "97.5%"),
+               caption = paste("Stand", example_stand))
+```
+
+The figure compares estimates with truth across all stands. Each species panel
+contains five DBH-class estimates per stand, with faint interval bars to keep
+overlapping estimates visible.
+
+```{r}
+#| label: fig-stand-densities
+#| fig-height: 4
+#| fig-cap: "Estimated versus true species-by-DBH densities for all 249 stands. Each panel contains 1,245 estimates (five DBH classes per stand); vertical bars show 95% posterior predictive intervals. Dashed lines mark equality. Axis ranges match within each panel and vary by species."
+
+# Give both axes the same upper limit within each species panel.
+stand_limits <- stand_comparison |>
+  group_by(species) |>
+  summarise(limit = max(truth, mean, q97_5), .groups = "drop")
+
+ggplot(stand_comparison, aes(truth, mean)) +
+  geom_blank(data = stand_limits, aes(x = limit, y = limit)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50") +
+  geom_errorbar(aes(ymin = q2_5, ymax = q97_5), width = 0,
+                color = "#0072B2", alpha = 0.08) +
+  geom_point(color = "#0072B2", size = 0.9, alpha = 0.4) +
+  facet_wrap(~ species, nrow = 1, scales = "free") +
+  scale_x_continuous(limits = c(0, NA)) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "True density (trees/ha)", y = "Estimated density (trees/ha)") +
+  theme_minimal() +
+  theme(aspect.ratio = 1)
+```
+
+The [varying-slopes article](stratum-slopes-plot-sampling.html) extends this model
+so canopy-height relationships can also differ among strata, in both magnitude
+and species allocation.
+
+The [spatial-effects article](spatial-effects-plot-sampling.html) represents processes
+that vary continuously across the forest. Nearby locations share information
+through spatial correlation, without requiring predefined strata.
+
+Random effects can also enter DBH allocation within species. The
+[conditional DBH-effects article](conditional-dbh-effects-plot-sampling.html)
+explains that extension with a spatial example and a short stratum alternative.

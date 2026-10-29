@@ -1,0 +1,25 @@
+---
+title: "Modeling and software details"
+description: "The technical reference for model definitions, priors, posterior computation, and prediction."
+resources:
+  - downloads/magComp.pdf
+format:
+  html:
+    embed-resources: true
+    code-overflow: wrap
+---
+
+The technical document describes the magnitude and composition models
+implemented in magComp. It gives the likelihoods, priors, parameter
+constraints, sampler updates, and numerical methods, along with fitted
+values, prediction, and aggregation.
+
+::: {.alert .alert-info role="note"}
+**Technical reference**
+
+[Read the technical document (PDF)](downloads/magComp.pdf){.btn .btn-primary}
+:::
+
+Consult this reference as needed for mathematical and computational details. The
+teaching articles connect the models to R code and explain how to interpret
+the results.

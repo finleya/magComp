@@ -1,0 +1,509 @@
+---
+title: "Magnitude models for fixed-area plots"
+description: "Estimate forest and stand tree density and compare with truth and a direct estimate."
+resources:
+  - downloads/plot-sampling.zip
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-overflow: wrap
+    html-math-method: katex
+bibliography: references.bib
+link-citations: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+
+Sys.setenv(TZ = "UTC")
+
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE,
+                      fig.width = 7, fig.height = 4)
+data_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)),
+                                    "../../dev/article-data/plot-sampling"))
+knitr::opts_knit$set(root.dir = data_dir)
+```
+
+We begin with a magnitude-only model to estimate overall tree density in
+trees per hectare. Using the [shared simulated forest](plot-sampling-data.html),
+we fit the model, examine fitted values, and aggregate predictions for
+the forest and its stands. Known population values let us assess parameter
+and density estimates. Comparisons with an intercept-only model and
+a direct estimate show what canopy height contributes. Subsequent articles
+consider composition alone and then combine magnitude and composition to
+estimate DBH distributions and species-by-DBH stand tables.
+
+::: {.alert .alert-info role="note"}
+**Example data**
+
+[Download the plot-sampling data (ZIP)](downloads/plot-sampling.zip){.btn .btn-primary download="plot-sampling.zip"}
+
+The introductory plot-sampling articles use this same archive.
+Extract it and use the folder containing `data/` as your R working directory.
+:::
+
+## Read the data
+
+The shared data use real forest boundaries, plot locations, and UAV-derived
+canopy heights from Weisse Krug in Germany [@spitta2026lidar]. Tree
+counts are simulated. There are 151 sampled plots and 4,812 prediction cells;
+a full plot or cell covers approximately 0.126 ha, with smaller areas along
+the forest boundary.
+
+We read the forest polygon and both data tables.
+
+```{r}
+#| label: read-data
+
+library(magComp)
+library(tidyverse)
+library(sf)
+
+set.seed(1)
+
+forest <- st_read("data/forest.gpkg", quiet = TRUE)
+forest_area <- as.numeric(st_area(forest)) / 10000
+
+plots <- read_csv("data/plots.csv")
+
+prediction <- read_csv("data/prediction.csv")
+
+plots |>
+  select(plot_id, area, p95, x, count) |>
+  head() |>
+  knitr::kable(digits = 3)
+```
+
+`count` is the total number of trees, `area` is the sampled area in hectares,
+and `p95` is the 95th percentile of canopy-height model values in meters.
+The column `x` contains p95 standardized using the plots' mean and standard
+deviation. Those same scaling values were applied to the prediction cells.
+We fit using the plot counts; simulated prediction-cell counts provide
+truth for assessment.
+
+## Define and fit the model
+
+For plot $i$, let $N_i$ be the observed count, $a_i$ its area in hectares,
+and $M_i$ the expected tree density in trees per hectare. We relate density
+to standardized canopy height $x_i$ and model counts with a negative-binomial
+(NB) distribution,
+
+$$
+\log M_i = \beta_0 + \beta_1 x_i, \qquad
+N_i \mid M_i,r_M \sim \operatorname{NB}(a_i M_i,r_M),
+$$
+
+where $a_i M_i$ is the mean count and $r_M$ is the size parameter. Larger
+plots have more expected trees at the same density. Count variance is
+$a_i M_i + (a_i M_i)^2/r_M$, so a larger size parameter means less variation
+around the mean.
+
+The intercept $\beta_0$ is log expected density at the plots' average p95,
+and $\beta_1$ describes the change in log density for a one-standard-deviation
+increase in p95. In the [technical document](modeling-and-software-details.html), the magnitude
+predictors here are $\mathbf z_i=(1,x_i)^\top$.
+The data were generated with $\beta_0=\log(350)$,
+$\beta_1=-0.2$, and $r_M=50$. These values are known for comparison;
+the fit estimates all three parameters.
+
+We supply the counts and areas with `magCompData()`. The formula `~ x`
+includes an intercept and a canopy-height slope, while `composition = NULL`
+requests a magnitude-only model.
+
+```{r}
+#| label: fit
+
+dat <- magCompData(plots, unit = plot_id, tree_count = count,
+                   design = fixedArea(area))
+
+fit <- magComp(
+  dat,
+  magnitude = ~ x,
+  composition = NULL,
+  control = magCompControl(
+    n_samples = 2000,
+    n_burn = 1000,
+    n_chains = 3,
+    n_cores = 3,
+    chain_seeds = 1:3,
+    verbose = FALSE
+  )
+)
+```
+
+Markov chain Monte Carlo (MCMC) produces parameter draws representing
+uncertainty given the data and priors. Each chain runs for 2,000 iterations,
+discards the first 1,000, and retains 1,000 draws, giving 3,000 draws across
+the three chains. We request three cores to run the chains in parallel and
+set their seeds for reproducibility. We use default priors and starting values.
+With no magnitude random effects, size is estimated automatically under a Gamma
+prior with shape 1 and rate 0.01; its hyperparameters can be changed with
+`magCompPriors()`.
+
+### Parameter estimates
+
+We use `summary()` to obtain parameter estimates and diagnostics, then add
+the generating values for comparison.
+
+```{r}
+#| label: parameter-estimates
+
+parameter_summary <- summary(fit)
+
+# Rows are the intercept, standardized p95 slope, and size.
+parameter_summary$truth <- c(log(350), -0.2, 50)
+
+parameter_summary |>
+  select(symbol, truth, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(
+    digits = 3,
+    col.names = c("Parameter", "Truth", "Mean", "2.5%", "97.5%", "R-hat", "ESS")
+  )
+```
+
+The labels `beta[0]`, `beta[x]`, and `r_M` correspond to $\beta_0$,
+$\beta_1$, and $r_M$. The posterior mean summarizes each parameter's draws;
+the 2.5% and 97.5% columns bound its central 95% credible interval.
+All three generating values fall within these intervals.
+Exponentiating a slope draw gives the corresponding multiplicative change
+in expected density for a one-standard-deviation increase in p95.
+
+R-hat values near one indicate agreement among chains. ESS is the effective
+sample size, accounting for dependence among iterations. We also inspect
+the traces: the chains should overlap without a clear upward or downward
+trend.
+
+```{r}
+#| label: fig-traces
+#| fig-height: 7
+#| fig-cap: "Retained intercept, canopy-height slope, and size draws. Colors distinguish the three chains."
+
+plot(fit, n_col = 1, n_row = 3)
+```
+
+## Examine fitted values
+
+By default, `fitted()` returns posterior means of expected density $M_i$
+as `magnitude` and expected count $a_i M_i$ as `count`. We compare these
+values with the observed counts at the sampled plots.
+
+```{r}
+#| label: fitted-values
+
+fitted_mean <- fitted(fit)
+
+fitted_values <- tibble(
+  plot_id = plots$plot_id,
+  observed_count = plots$count,
+  expected_count = fitted_mean$count[, "total"],
+  expected_density = fitted_mean$magnitude[, "total"]
+)
+
+fitted_values |>
+  head() |>
+  knitr::kable(digits = 1)
+```
+
+The table gives counts per plot and densities in trees/ha. We plot observed
+counts against fitted mean counts; the dashed line marks equality.
+
+```{r}
+#| label: fig-fitted
+#| fig-cap: "Observed counts versus fitted mean counts at the 151 sampled plots."
+
+# Use the same count range on both axes, including zero.
+count_limits <- range(0, fitted_values$expected_count, fitted_values$observed_count)
+
+ggplot(fitted_values, aes(expected_count, observed_count)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50") +
+  geom_point(color = "#0072B2", alpha = 0.6) +
+  coord_equal(xlim = count_limits, ylim = count_limits) +
+  labs(x = "Fitted mean count", y = "Observed count") +
+  theme_minimal()
+```
+
+Counts vary around their means, so scatter is expected even when the model
+is correct. A systematic pattern above or below the line can indicate
+underprediction or overprediction. For additional diagnostics,
+`ppcSummary(fit)` compares observed counts with posterior predictive
+replicates and reports two-sided Bayesian posterior predictive p-values
+([Gelman, 2013](https://doi.org/10.1214/13-EJS854)). Small values flag
+unusual counts under the model; they are not probabilities that the model
+is correct.
+
+## Predict across the forest
+
+To estimate realized forest density, we use posterior predictive counts.
+For each selected parameter draw, `target = "observation"` draws a count
+from the NB distribution at every prediction cell. This includes count
+variation as well as uncertainty in the coefficients and size. The function
+returns both these counts and their densities, obtained by dividing by cell
+area. We use 100 parameter draws per chain for prediction and retain the
+resulting predictive draws for aggregation. The fitted object still holds
+all draws for parameter summaries and diagnostics.
+
+```{r}
+#| label: predict
+
+predictions <- predict(
+  fit,
+  prediction |> select(plot_id, x, area),
+  target = "observation",
+  n_draws = 100,
+  summary = "samples"
+)
+
+# Prediction location x retained draw x chain.
+dim(predictions$magnitude)
+```
+
+The magnitude array contains 4,812 locations, 100 draws per chain, and
+three chains. Each draw uses the same sampled parameters across all
+locations. Prediction uses covariates and areas; the simulated cell counts
+are reserved for checking the predictions.
+
+We summarize the predictive counts and compare their means with the
+simulated counts at these new locations.
+
+```{r}
+#| label: fig-predicted
+#| fig-cap: "Simulated counts versus posterior predictive mean counts at the 4,812 prediction cells. The dashed line marks equality."
+
+prediction_summary <- summary(predictions) |>
+  filter(quantity == "count") |>
+  mutate(observed_count = prediction$count)
+
+count_limits <- range(0, prediction_summary$mean, prediction_summary$observed_count)
+
+ggplot(prediction_summary, aes(mean, observed_count)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50") +
+  geom_point(color = "#0072B2", alpha = 0.3) +
+  coord_equal(xlim = count_limits, ylim = count_limits) +
+  labs(x = "Predicted mean count", y = "Simulated count") +
+  theme_minimal()
+```
+
+### Aggregate with standSummary()
+
+We average predictive densities across cells within each draw. Cell-area
+weights give smaller boundary cells less influence.
+Omitting `group` in `standSummary()` produces
+one summary for the entire forest.
+
+```{r}
+#| label: forest-estimate
+
+forest_predictions <- standSummary(
+  predictions,
+  data = prediction,
+  unit = plot_id,
+  represented_area = area,
+  summary = "samples"
+)
+
+forest_summary <- summary(forest_predictions)
+forest_summary
+```
+
+The posterior mean forest density is **`r round(forest_summary$mean, 1)`
+trees/ha**, with a 95% posterior predictive interval from
+**`r round(forest_summary$q2_5, 1)` to `r round(forest_summary$q97_5, 1)` trees/ha**.
+This interval contains the central 95% of the posterior predictive
+distribution for forest density. We calculate its endpoints across the
+aggregated draws, rather than averaging intervals from individual cells.
+
+To estimate the total number of trees over the forest polygon, multiply each
+aggregated density draw by `forest_area` before summarizing. Equivalently,
+use `type = "total"` with represented cell areas scaled to sum to `forest_area`.
+
+## Compare with truth and the direct estimate
+
+We calculate the known forest density by applying the same area-weighted
+average to simulated cell counts divided by cell area.
+
+```{r}
+#| label: forest-truth
+
+true_forest_density <- weighted.mean(
+  prediction$count / prediction$area, prediction$area
+)
+```
+
+To assess the contribution of canopy height, we also fit an intercept-only
+model using `~ 1`, predict across the same cells, and aggregate with the same
+weights. Both models estimate size and use the same observations, default
+priors, and MCMC settings.
+
+```{r}
+#| label: intercept-only
+
+intercept_fit <- magComp(
+  dat,
+  magnitude = ~ 1,
+  composition = NULL,
+  control = magCompControl(
+    n_samples = 2000,
+    n_burn = 1000,
+    n_chains = 3,
+    n_cores = 3,
+    chain_seeds = 1:3,
+    verbose = FALSE
+  )
+)
+
+intercept_predictions <- predict(
+  intercept_fit,
+  prediction |> select(plot_id, area),
+  target = "observation",
+  n_draws = 100,
+  summary = "samples"
+)
+
+intercept_forest <- standSummary(
+  intercept_predictions,
+  data = prediction,
+  unit = plot_id,
+  represented_area = area,
+  summary = "samples"
+)
+
+intercept_summary <- summary(intercept_forest)
+```
+
+We can also compare the model estimates with the design-based direct
+estimate, the mean of observed plot densities. We use the usual sample-based
+standard error and a Student's t value with 150 degrees of freedom for an
+approximate 95% confidence interval. This simple interval calculation does
+not account for the systematic arrangement of the inventory plots.
+
+```{r}
+#| label: direct-comparison
+
+# Direct estimate and its approximate t-based confidence interval.
+sample_density <- plots$count / plots$area
+n <- nrow(plots)
+
+direct_mean <- mean(sample_density)
+direct_se <- sd(sample_density) / sqrt(n)
+direct_interval <- direct_mean + c(-1, 1) * qt(0.975, df = n - 1) * direct_se
+
+# Compare the direct estimate and both model estimates.
+comparison <- tibble(
+  method = c("Direct estimate", "Intercept only", "With canopy height"),
+  estimate = c(direct_mean, intercept_summary$mean, forest_summary$mean),
+  lower = c(direct_interval[1], intercept_summary$q2_5, forest_summary$q2_5),
+  upper = c(direct_interval[2], intercept_summary$q97_5, forest_summary$q97_5)
+)
+
+knitr::kable(comparison, digits = 1,
+             col.names = c("Method", "Trees/ha", "Lower 95%", "Upper 95%"))
+```
+
+The known forest density is **`r round(true_forest_density, 1)` trees/ha**.
+All three estimates use the same 151 sampled plots. Only the model with
+canopy height uses predictor information across the forest. We compare
+their estimates and intervals with the known density below.
+
+```{r}
+#| label: fig-forest-comparison
+#| fig-height: 3.5
+#| fig-cap: "Forest density estimates and 95% intervals. Model intervals summarize posterior predictive draws; the direct estimate has an approximate Student's t confidence interval. The dashed line marks simulated truth."
+
+ggplot(comparison, aes(method, estimate, color = method)) +
+  geom_hline(yintercept = true_forest_density, linetype = "dashed") +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.15) +
+  geom_point(size = 3) +
+  scale_color_manual(values = c("Direct estimate" = "#D55E00",
+                                "Intercept only" = "#009E73",
+                                "With canopy height" = "#0072B2")) +
+  labs(x = NULL, y = "Forest density (trees/ha)") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Here the intercept-only estimate is close to the direct estimate. Adding
+canopy height brings the forest estimate closer to truth and gives a somewhat
+narrower interval. The canopy-height model accounts for differences in the
+predictor distribution between sampled plots and the forest grid.
+
+A design-based confidence interval is interpreted through repeated sampling
+from the same forest. The model interval assigns 95% posterior probability
+to the stated range for forest density, conditional on the observations,
+model, and priors. Their widths need not agree, and adding a predictor does
+not guarantee a narrower interval.
+
+## Estimate stand densities
+
+The same predictions also give density estimates for each of the 249 stands.
+Some cells cross stand boundaries, so we use the area of each cell within
+each stand as its weight. A cell contributes the same predicted density draw
+to every stand it overlaps.
+
+We read the overlap table constructed in the [data article](plot-sampling-data.html#cell-areas-within-stands).
+In `standSummary()`, `unit` identifies the prediction cell, `group` identifies
+the stand, and `represented_area` gives its area within that stand. The
+function averages densities within each stand for every posterior draw.
+
+```{r}
+#| label: stand-estimates
+
+cell_stand_areas <- read_csv("data/cell_stand_areas.csv")
+
+stand_predictions <- standSummary(
+  predictions,
+  data = cell_stand_areas,
+  unit = prediction_id,
+  group = stand_id,
+  represented_area = area_ha,
+  summary = "samples"
+)
+
+stand_estimates <- summary(stand_predictions) |>
+  transmute(stand_id = unit, estimate = mean, lower = q2_5, upper = q97_5)
+```
+
+We calculate true stand densities from the simulated cell counts using the
+same overlap areas, then compare estimates and their 95% posterior predictive
+intervals with truth. The dashed line marks equality.
+
+```{r}
+#| label: fig-stand-estimates
+#| fig-height: 5
+#| fig-cap: "Estimated versus true stand density. Points are posterior means and vertical bars are 95% posterior predictive intervals for the 249 stands."
+
+stand_truth <- cell_stand_areas |>
+  left_join(
+    prediction |> transmute(prediction_id = plot_id, density = count / area),
+    by = "prediction_id"
+  ) |>
+  group_by(stand_id) |>
+  summarise(truth = weighted.mean(density, area_ha), .groups = "drop")
+
+stand_estimates <- stand_estimates |>
+  left_join(stand_truth, by = "stand_id")
+
+stand_limits <- range(0, stand_estimates$truth, stand_estimates$lower,
+                       stand_estimates$upper)
+
+ggplot(stand_estimates, aes(truth, estimate)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50") +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0,
+                 color = "#0072B2", alpha = 0.25) +
+  geom_point(color = "#0072B2", size = 1.5) +
+  coord_equal(xlim = stand_limits, ylim = stand_limits) +
+  labs(x = "True stand density (trees/ha)",
+       y = "Estimated stand density (trees/ha)") +
+  theme_minimal()
+```
+
+The model gives estimates for stands with and without sampled plots because
+canopy height is available across the forest. Each interval summarizes the
+aggregated predictive draws for that stand.
+
+The next article fits [species composition](composition-plot-sampling.html)
+to describe how a known total is allocated among species.
+
+## References

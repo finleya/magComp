@@ -1,0 +1,410 @@
+---
+title: "Space-time effects with repeated plot measurements"
+description: "Fit an inventory with partial remeasurement, estimate spatial and temporal dependence, and summarize forest distributions by year."
+resources:
+  - downloads/space-time-plot-sampling.zip
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-overflow: wrap
+    html-math-method: katex
+bibliography: references.bib
+link-citations: true
+---
+
+```{r}
+#| label: setup
+#| include: false
+Sys.setenv(TZ = "UTC")
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE,
+                      fig.width = 7, fig.height = 4)
+data_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)),
+                                    "../../dev/article-data/space-time-plot-sampling"))
+knitr::read_chunk(file.path(data_dir, "generate_population.R"))
+knitr::opts_knit$set(root.dir = data_dir)
+```
+
+Forest inventories often revisit only part of their plots in a given year.
+We extend the [spatial model](spatial-effects-plot-sampling.html) so nearby
+plots can share information both across space and across measurement years.
+The magnitude effect and the species factor now vary with location and time.
+We estimate their covariance parameters, map combined intercepts, and compare
+forest species-by-DBH densities at the beginning and end of the study.
+
+The example starts with all 151 plots in year 0 and revisits 25 plots in each
+of years 1 through 9, giving 376 plot measurements. It uses the same forest
+geometry and LiDAR canopy heights as the [data article](plot-sampling-data.html)
+[@spitta2026lidar]. Counts are simulated. Canopy height is held constant over
+time so changes in this example arise through the space-time effects.
+
+::: {.alert .alert-info role="note"}
+**Example data**
+
+[Download the space-time data (ZIP)](downloads/space-time-plot-sampling.zip){.btn .btn-primary download="space-time-plot-sampling.zip"}
+
+Extract the archive and use the folder containing `data/` as your R working
+directory. It includes the generated counts, known effects, forest polygons,
+and `generate_population.R`. Reading these files avoids generating the full
+GP population again; the optional generator uses seed 1.
+:::
+
+## Read the repeated measurements
+
+`site_id` identifies a physical location. `plot_id` identifies a measurement
+at a particular site and year, so repeated measurements have different
+`plot_id` values. The prediction file contains the 4,812 forest cells in
+years 0 and 9. `location_id` links each prediction to its cell polygon.
+
+```{r}
+#| label: read-data
+library(magComp)
+library(tidyverse)
+library(sf)
+
+plots <- read_csv("data/plots.csv")
+
+prediction <- read_csv("data/prediction.csv")
+
+true_parameters <- read_csv("data/true_parameters.csv", na = "NA")
+
+forest <- st_read("data/forest.gpkg", quiet = TRUE)
+
+prediction_cells <- st_read("data/prediction_cells.gpkg", quiet = TRUE) |>
+  rename(location_id = plot_id)
+
+plots |> count(year, name = "Measured plots") |> knitr::kable()
+```
+
+We map the measurements to see how the inventory covers the forest over time.
+
+```{r}
+#| label: fig-visit-locations
+#| fig-height: 6
+#| fig-cap: "Sampled locations in each year. The initial inventory measures every plot; later years remeasure subsets."
+plot_locations <- plots |>
+  st_as_sf(coords = c("easting", "northing"), crs = st_crs(forest), remove = FALSE)
+
+ggplot() +
+  geom_sf(data = forest, fill = "grey95", color = "grey70", linewidth = 0.15) +
+  geom_sf(data = plot_locations, color = "#0072B2", size = 0.7) +
+  facet_wrap(~ year, ncol = 5) +
+  coord_sf(datum = NA) +
+  theme_void()
+```
+
+## Describe the space-time model
+
+The magnitude model retains the same regression and negative-binomial count
+likelihood, with a space-time effect in the log density,
+
+$$
+\log M_i=\beta_0+\beta_1x_i+v(\mathbf{s}_i,t_i),\qquad
+N_i\mid M_i,r_M\sim\operatorname{NB}(a_i M_i,r_M).
+$$
+
+Here $x_i$ is standardized canopy height, $a_i$ is area in hectares, and
+$t_i$ is measurement year. The separable exponential covariance is
+
+$$
+\operatorname{Cov}\{v(\mathbf{s},t),v(\mathbf{s}',t')\}
+=\sigma_v^2\exp\{-\phi_v\|\mathbf{s}-\mathbf{s}'\|
+                 -\lambda_v|t-t'|\}.
+$$
+
+The spatial decay $\phi_v$ governs dependence with distance, and the temporal
+decay $\lambda_v$ governs dependence with elapsed time. Larger values give
+faster decreases in correlation. At a fixed site, latent effects a year apart
+have correlation $\exp(-\lambda_v)$. At a fixed year, the model reduces
+to the exponential spatial covariance used in the
+[spatial-effects article](spatial-effects-plot-sampling.html).
+
+Species allocation uses an independent, unit-variance space-time factor,
+
+$$
+\pi_{ij}=\Phi\{\alpha_{0j}+\alpha_{1j}x_i+
+                       \lambda_j w(\mathbf{s}_i,t_i)\},
+$$
+
+with correlation $\exp\{-\phi_w\|\mathbf{s}-\mathbf{s}'\|
+-\lambda_w|t-t'|\}$. The loadings $\lambda_j$ describe species responses to
+this common factor; $\lambda_w$ is its temporal decay. Pine is the positive
+anchor, oak has its own loading, and birch receives the remaining trees.
+DBH allocation within species uses the same canopy-height regressions as
+the full-model article, without additional random effects.
+
+We generate the magnitude field with $\sigma_v=0.5$, $\phi_v=3$, and
+$\lambda_v=0.35$, and the species field with $\phi_w=5$ and $\lambda_w=0.25$.
+Spatial distances are in kilometers and time differences are in years.
+Magnitude coefficients are $\beta_0=\log(350)$ and $\beta_1=-0.2$;
+size is $r_M=1000$. Pine and oak loadings are 0.7 and -0.5.
+
+<details>
+<summary>Optional full-GP population generation</summary>
+
+The supplied script first selects the measurement schedule and sets the
+parameters. Each site appears at most once in each year.
+
+```{r}
+#| label: space-time-inputs
+#| eval: false
+```
+
+```{r}
+#| label: space-time-parameters
+#| eval: false
+```
+
+Separability lets us generate the full GP with a spatial Cholesky factor
+and a temporal Cholesky factor. If $Z$ contains independent standard Normal
+values, $L_S Z L_T^\mathsf{T}$ has the required covariance across sites and
+years. Both the observations and prediction cells are included in these
+draws. The spatial matrix still requires more memory than reading the
+supplied data.
+
+```{r}
+#| label: space-time-fields
+#| eval: false
+```
+
+The rest of `generate_population.R` draws negative-binomial totals, allocates
+them to species and DBH classes, and writes the CSV files. Run
+`source("generate_population.R")` to reproduce the population.
+
+</details>
+
+## Fit the model
+
+We arrange the counts into one row per measurement, species, and DBH class.
+Time belongs to the measurement, so every category row for a given
+`plot_id` has the same year and coordinates.
+
+```{r}
+#| label: model-data
+species_order <- c("pine", "oak", "birch")
+dbh_classes <- c("10-20", "20-30", "30-40", "40-50", "50+")
+
+trees <- plots |>
+  select(plot_id, area, x, easting_km, northing_km, year, contains(":")) |>
+  pivot_longer(contains(":"), names_to = c("species", "dbh_class"),
+               names_sep = ":", values_to = "count") |>
+  mutate(species = factor(species, levels = species_order),
+         dbh_class = ordered(dbh_class, levels = dbh_classes))
+
+dat <- magCompData(trees, unit = plot_id, categories = c(species, dbh_class),
+  tree_count = count, ordered = c(species = FALSE, dbh_class = TRUE),
+  design = fixedArea(area))
+```
+
+The final coordinate in a space-time term is time. `cov_model = "sep_exp"`
+selects the separable exponential correlation. We use 15 neighbors and set
+`st_scale = 0.25`, making a one-year gap equivalent to 0.25 km when selecting
+neighbors. This search scale stays fixed; the covariance uses the actual
+spatial and temporal differences and estimates their separate decays.
+
+The package supplies automatic priors and starting values. Here we explicitly
+set uniform supports for the decays to show how to specify them. The same
+supports apply to the magnitude field and the species factor, whose parameter
+values are estimated separately.
+
+```{r}
+#| label: fit
+covariance_prior <- list(phi = uniform(0.3, 10), lambda = uniform(0.05, 1))
+
+fit <- magComp(
+  dat,
+  magnitude = ~ x + nngp(easting_km, northing_km, year, cov_model = "sep_exp",
+                          st_scale = 0.25, m = 15, name = "space_time"),
+  composition = magCompComposition(
+    species ~ x + factor_nngp(easting_km, northing_km, year,
+      cov_model = "sep_exp", st_scale = 0.25, m = 15,
+      anchors = "pine", name = "space_time"),
+    dbh_class | species ~ x
+  ),
+  priors = magCompPriors(
+    magnitude = list(terms = list(space_time = list(covariance = covariance_prior))),
+    composition = list(blocks = list(species = list(
+      terms = list(space_time = list(covariance = covariance_prior)))))
+  ),
+  control = magCompControl(n_samples = 8000, n_burn = 3000, n_chains = 3,
+    n_cores = 3, chain_seeds = 1:3, nb_size = 1000, verbose = FALSE)
+)
+```
+
+Each chain retains 5,000 draws. Size remains fixed because the magnitude model
+includes a random effect. `magCompCovModels()` lists the other available
+covariance families. `magCompSettings(fit)` reports resolved priors, starting
+values, and tuning. A covariance parameter can be held fixed with
+`fixed(value)` in its corresponding starting entry.
+
+## Examine parameters and combined intercepts
+
+We compare the magnitude and species parameter estimates with their known
+values. The temporal decays appear as `lambda_v` and `lambda_w[pine]`;
+the loading rows have `parameter = "loadings"`.
+
+```{r}
+#| label: parameter-summary
+parameter_summary <- summary(fit)
+
+parameter_comparison <- parameter_summary |>
+  filter(component == "magnitude" | block == "species") |>
+  left_join(true_parameters, by = c("component", "block", "parameter", "index"))
+
+parameter_comparison |>
+  select(symbol, truth, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(digits = 3,
+    col.names = c("Parameter", "Truth", "Mean", "2.5%", "97.5%", "R-hat", "ESS"))
+```
+
+The intervals for both spatial and temporal decays include their generating
+values, as do those for the magnitude variance and species loadings. The
+magnitude intercept has a larger R-hat, about 1.06. Intercepts and latent effects
+can trade off while leaving their sums nearly unchanged. As in the spatial
+article, we also inspect the combined intercepts, averaged over the measured
+plot visits within each posterior draw.
+
+```{r}
+#| label: combined-diagnostics
+summary(fit, type = "combined", group = ".all") |>
+  select(component, stick, mean, rhat, ess) |>
+  knitr::kable(digits = 3)
+```
+
+The combined-intercept R-hats are close to one, with much larger effective
+sample sizes than the separate intercepts. These diagnostics concern the
+combined coefficients. They do not replace
+checking the separate covariance and loading parameters in the preceding table.
+
+## Predict the forest in two years
+
+We supply all cells in both years in one prediction call, retaining their
+joint space-time dependence. The observation target draws new counts and
+allocations in addition to new latent effects. We use 50 draws per chain for
+the figures and summaries, while keeping every fitting draw for diagnostics.
+
+```{r}
+#| label: predict
+set.seed(1)
+
+predictions <- predict(
+  fit,
+  prediction |> select(plot_id, area, x, easting_km, northing_km, year),
+  type = "density", target = "observation", summary = "samples",
+  n_draws = 50, keep_effects = TRUE
+)
+```
+
+### Map true and estimated relationships
+
+The maps compare combined intercepts at the first and last years. Each
+magnitude intercept is log density at average canopy height; the species
+intercepts are on the probit scale. The maps use the same latent draws as
+the density predictions.
+
+```{r}
+#| label: map-values
+intercept_summary <- summary(samples(predictions, type = "combined")) |>
+  mutate(plot_id = as.integer(unit),
+         component = if_else(component == "magnitude", "Magnitude", str_to_title(stick)))
+
+true_intercepts <- prediction |>
+  select(plot_id, location_id, year, magnitude_intercept, pine_intercept, oak_intercept) |>
+  pivot_longer(ends_with("intercept"), names_to = "component", values_to = "truth") |>
+  mutate(component = recode(component, magnitude_intercept = "Magnitude",
+                             pine_intercept = "Pine", oak_intercept = "Oak"))
+
+map_values <- intercept_summary |>
+  select(plot_id, component, Estimate = mean) |>
+  left_join(true_intercepts, by = c("plot_id", "component")) |>
+  rename(Truth = truth) |>
+  pivot_longer(c(Truth, Estimate), names_to = "source", values_to = "intercept") |>
+  mutate(source = factor(source, levels = c("Truth", "Estimate")))
+
+intercept_maps <- prediction_cells |>
+  left_join(map_values, by = "location_id", relationship = "many-to-many")
+```
+
+```{r}
+#| label: fig-magnitude-intercepts
+#| fig-height: 7
+#| fig-cap: "True and estimated combined magnitude intercepts in years 0 and 9, on a common log-density scale."
+ggplot(filter(intercept_maps, component == "Magnitude")) +
+  geom_sf(aes(fill = intercept), color = NA) +
+  geom_sf(data = forest, fill = NA, color = "grey50", linewidth = 0.15) +
+  facet_grid(year ~ source) +
+  scale_fill_viridis_c(name = "Combined\nintercept") +
+  coord_sf(datum = NA) +
+  theme_void()
+```
+
+```{r}
+#| label: fig-species-intercepts
+#| fig-height: 10
+#| fig-cap: "True and estimated combined species intercepts by year, on a common probit scale. Oak allocation is conditional on a tree not being pine."
+ggplot(filter(intercept_maps, component != "Magnitude")) +
+  geom_sf(aes(fill = intercept), color = NA) +
+  geom_sf(data = forest, fill = NA, color = "grey50", linewidth = 0.15) +
+  facet_grid(component + year ~ source) +
+  scale_fill_viridis_c(name = "Combined\nintercept") +
+  coord_sf(datum = NA) +
+  theme_void()
+```
+
+### Summarize each year's forest distribution
+
+We pass `year` as the grouping variable to `standSummary()`. Each year gets
+its own area-weighted density, using the same forest cells. Omitting this
+group would average across both years, which is a different target.
+
+```{r}
+#| label: forest-summary
+forest_predictions <- standSummary(
+  predictions, data = prediction, unit = plot_id, group = year,
+  represented_area = area, summary = "samples"
+)
+
+forest_truth <- prediction |>
+  select(year, area, contains(":")) |>
+  pivot_longer(contains(":"), names_to = "category", values_to = "count") |>
+  group_by(year, category) |>
+  summarise(truth = sum(count) / sum(area), .groups = "drop")
+
+forest_comparison <- summary(forest_predictions) |>
+  as_tibble() |>
+  mutate(year = as.integer(unit)) |>
+  left_join(forest_truth, by = c("year", "category")) |>
+  separate_wider_delim(category, delim = ":", names = c("species", "dbh_class")) |>
+  mutate(species = factor(species, levels = species_order),
+         dbh_class = ordered(dbh_class, levels = dbh_classes))
+```
+
+```{r}
+#| label: fig-forest-distributions
+#| fig-height: 6
+#| fig-cap: "Forest species-by-DBH densities in years 0 and 9. Blue points and bars show posterior predictive means and 95% intervals; black horizontal marks show simulated truth."
+ggplot(forest_comparison, aes(dbh_class, mean)) +
+  geom_errorbar(aes(ymin = q2_5, ymax = q97_5), width = 0.15, color = "#0072B2") +
+  geom_point(aes(shape = "Estimate"), color = "#0072B2", size = 2) +
+  geom_point(aes(y = truth, shape = "Truth"), size = 5) +
+  scale_shape_manual(values = c("Truth" = 95, "Estimate" = 16),
+                     breaks = c("Truth", "Estimate"), name = NULL) +
+  facet_grid(year ~ species) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(x = "DBH class (cm)", y = "Trees per hectare") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+```
+
+The year-9 intervals are generally wider: only 25 plots were measured in
+that year, and measurements from other years supply partial information
+through temporal dependence.
+
+These distributions combine canopy height with the estimated space-time
+variation in abundance and species allocation. The model describes changing
+distributions; it does not track individual trees or impose a growth model.
+With time-varying canopy heights or other covariates, supply their values at
+each observed and prediction date. Stand summaries can use the same draws,
+with a grouping column that identifies each stand and year and the cell's
+intersection area within that stand.

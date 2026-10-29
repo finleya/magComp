@@ -1,0 +1,47 @@
+Package: magComp
+Type: Package
+Title: Bayesian Magnitude-Composition Models
+Version: 0.0.6
+Authors@R: c(
+    person("Andrew O.", "Finley", role = c("aut", "cre"),
+           email = "finleya@msu.edu"),
+    person("Arne", "Nothdurft", role = "ctb"),
+    person("Arthur", "Spitta", role = "ctb"),
+    person("Malcolm S.", "Itter", role = "ctb"))
+Author: Andrew O. Finley [aut, cre],
+    Arne Nothdurft [ctb],
+    Arthur Spitta [ctb],
+    Malcolm S. Itter [ctb]
+Maintainer: Andrew O. Finley <finleya@msu.edu>
+URL: https://finleya.github.io/magComp/,
+    https://github.com/finleya/magComp
+BugReports: https://github.com/finleya/magComp/issues
+Description: Fits Bayesian magnitude-composition models for fixed-area stem
+    counts and point-sampling basal area. A negative-binomial magnitude model
+    describes overall abundance, and multinomial allocation distributes it
+    among categories. Models support regression, group, spatial, and space-time effects,
+    composition factors, smoothing across ordered categories, posterior
+    prediction, and area-weighted summaries.
+License: GPL (>= 3)
+Encoding: UTF-8
+Depends:
+    R (>= 4.4.0)
+Imports:
+    BayesLogit,
+    graphics,
+    grDevices,
+    Matrix,
+    parallel,
+    stats,
+    utils
+LinkingTo:
+    BayesLogit,
+    Matrix
+Suggests:
+    ggplot2,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
