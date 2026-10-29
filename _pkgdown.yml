@@ -16,8 +16,8 @@ articles:
       Consult the [detailed technical document (PDF)](downloads/magComp.pdf)
       as needed for model definitions, priors, sampler updates, and prediction.
       The articles below introduce the models through worked examples.
-    contents:
-      - articles/modeling-and-software-details
+    # An empty selection keeps the introduction without an article listing.
+    contents: ["c()"]
   - title: Fixed-area plot sampling
     desc: >-
       Begin with the shared simulated forest. The magnitude article estimates
@@ -47,3 +47,6 @@ articles:
       - articles/spatial-effects-plot-sampling
       - articles/conditional-dbh-effects-plot-sampling
       - articles/space-time-effects-plot-sampling
+  - title: internal
+    contents:
+      - articles/modeling-and-software-details
