@@ -1,0 +1,19 @@
+pandoc: 3.8.2.1
+pkgdown: 2.1.1
+pkgdown_sha: ~
+articles:
+  articles/composition-plot-sampling: composition-plot-sampling.html
+  articles/conditional-dbh-effects-plot-sampling: conditional-dbh-effects-plot-sampling.html
+  articles/dbh-plot-sampling: dbh-plot-sampling.html
+  articles/full-model-plot-sampling: full-model-plot-sampling.html
+  articles/magnitude-plot-sampling: magnitude-plot-sampling.html
+  articles/modeling-and-software-details: modeling-and-software-details.html
+  articles/plot-sampling-data: plot-sampling-data.html
+  articles/space-time-effects-plot-sampling: space-time-effects-plot-sampling.html
+  articles/spatial-effects-plot-sampling: spatial-effects-plot-sampling.html
+  articles/stratum-effects-plot-sampling: stratum-effects-plot-sampling.html
+  articles/stratum-slopes-plot-sampling: stratum-slopes-plot-sampling.html
+last_built: 2026-10-29T17:23Z
+urls:
+  reference: https://finleya.github.io/magComp/reference
+  article: https://finleya.github.io/magComp/articles
