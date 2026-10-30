@@ -9,11 +9,6 @@ Rplots.pdf
 .Rhistory
 .RData
 .Rproj.user
-.codex/
-.claude/
-.agents/
-AGENTS.md
-CLAUDE.md
 private/
 dev/roadmap/
 dev/prediction-interface-discussion.md

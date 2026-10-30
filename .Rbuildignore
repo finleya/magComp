@@ -1,11 +1,6 @@
 ^\.git$
 ^\.gitignore$
 ^\.github$
-^\.claude$
-^\.codex$
-^\.agents$
-^AGENTS\.md$
-^CLAUDE\.md$
 ^private$
 ^.*\.Rproj$
 ^\.Rproj\.user$
