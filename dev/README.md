@@ -9,9 +9,12 @@ also excluded from package builds.
 
 From the package root, build and check the source package:
 
+Use a clean checkout so local study outputs are not copied into R's temporary
+build directory.
+
 ```sh
 R CMD build .
-R CMD check --no-manual magComp_0.0.6.tar.gz
+R CMD check --no-manual magComp_0.0.7.tar.gz
 ```
 
 Routine tests are in `tests/testthat/`. Additional numerical comparisons
@@ -43,9 +46,12 @@ Rscript dev/build_articles.R
 
 The builder uses `_pkgdown.yml` for navigation and writes the site to
 `docs/`. It preserves standalone HTML previews beside the article sources.
-Articles execute their analyses when rendered; fitted models and predictions
-are not cached. Geometry preparation and optional population generation are
-separate steps described in each dataset README.
+The simulated-data articles execute their analyses when rendered; fitted models
+and predictions are not cached. The Harvard Forest inventory article reads saved
+summaries for both its first inventory and its 1,000-layout study. Its fitting and
+prediction code is displayed but not executed by the website builder. Geometry
+preparation and optional population generation are separate steps described in
+each dataset README.
 
 ## Website publication
 

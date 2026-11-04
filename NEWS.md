@@ -1,3 +1,15 @@
+# magComp 0.0.7
+
+* Improve exploration of composition factor signs by sampling unrestricted
+  working loadings and jointly aligning loading columns and factor scores
+  to positive anchors. This preserves the existing model, half-normal
+  diagonal priors, and upper-anchor zeros for group, spatial, and space-time
+  factors in leading and conditional allocation blocks.
+
+* Add a Harvard Forest inventory article with a mapped census, five model
+  specifications, and a 1,000-layout repeated-sampling assessment. The data,
+  analysis code, and compact results are available with the article.
+
 # magComp 0.0.6
 
 Initial public release.

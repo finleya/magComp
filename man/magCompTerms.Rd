@@ -77,6 +77,10 @@ positive, estimated diagonal entries. Automatic anchors use variation in observe
 ratios. Default factor names are the anchor categories. Factor rank and anchor
 constraints are model specifications; diagonal loadings are estimated under
 half-normal priors controlled by \code{loading_variance}.
+The sampler updates unrestricted working loadings, then jointly changes the
+sign of each loading column and its factor scores when needed to make the
+anchor positive. This preserves the factor contributions and the specified
+priors; returned draws satisfy the anchor constraints.
 
 Colon interactions such as \code{height:iid(stand)} or
 \code{height:factor_nngp(x, y, K = 1)} multiply the latent contribution by the

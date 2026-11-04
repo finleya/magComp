@@ -47,3 +47,32 @@ test_that("positive diagonal priors reach leading and child iid/GP/NNGP terms", 
                          parameter == "loadings")$prior[1], "restricted to")
   }
 })
+
+test_that("a weak anchor does not trap the relative signs of informed loadings", {
+  rows <- expand.grid(plot = 1:4, species = c("a", "b"),
+                      dbh = c("small", "large"))
+  rows$area <- 1
+  rows$count <- 0L
+  successes <- c(5L, 20L, 180L, 195L)
+  rows$count[rows$species == "a" & rows$dbh == "small"] <- successes
+  rows$count[rows$species == "a" & rows$dbh == "large"] <- 200L - successes
+  dat <- magCompData(rows, unit = plot, categories = c(species, dbh),
+                     tree_count = count, design = fixedArea(area))
+  fit <- magComp(dat, composition = magCompComposition(species ~ 1,
+    dbh | species ~ 1 + factor_iid(plot, K = 1, anchors = "b:small", name = "shape")),
+    control = magCompControl(n_samples = 2000, n_burn = 500,
+      chain_seeds = 713, verbose = FALSE))
+  x <- samples(fit)$composition$blocks[["dbh|species"]]
+  loading <- x$terms$shape$loadings["a:small", 1, ]
+  anchor <- x$terms$shape$loadings["b:small", 1, ]
+
+  # Parent b has no trees, so its child likelihood supplies no sign information.
+  # The posterior for a's loading is symmetric, despite its strong contrast
+  # between groups. Check both signs and the preserved fitted contribution.
+  expect_true(all(anchor > 0))
+  expect_lt(abs(mean(loading > 0) - 0.5), 0.08)
+  intercept <- x$coefficients["a:small", "(Intercept)", ]
+  probability <- vapply(as.character(1:4), function(group)
+    mean(pnorm(intercept + loading * x$terms$shape$scores[group, 1, ])), numeric(1))
+  expect_lt(max(abs(probability - successes / 200)), 0.05)
+})

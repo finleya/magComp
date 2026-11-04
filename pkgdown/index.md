@@ -42,8 +42,8 @@ their own through a common interface.
 
 ## Get started
 
-The [article series](articles/index.html) develops the models using simulated
-forest populations with downloadable data and runnable code.
+The [articles](articles/index.html) develop the models using simulated
+forest populations and real inventory studies, with downloadable data and runnable code.
 
 Consult the [model and computation guide](articles/modeling-and-software-details.html) for the model,
 priors, sampler, and prediction methods. The [function reference](reference/index.html)

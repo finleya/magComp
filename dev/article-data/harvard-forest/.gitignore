@@ -1,0 +1,6 @@
+output/
+Rplots.pdf
+checks/*.log
+
+/.quarto/
+**/*.quarto_ipynb

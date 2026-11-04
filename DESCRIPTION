@@ -1,7 +1,7 @@
 Package: magComp
 Type: Package
 Title: Bayesian Magnitude-Composition Models
-Version: 0.0.6
+Version: 0.0.7
 Authors@R: c(
     person("Andrew O.", "Finley", role = c("aut", "cre"),
            email = "finleya@msu.edu"),

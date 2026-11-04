@@ -47,6 +47,9 @@ articles:
       - articles/spatial-effects-plot-sampling
       - articles/conditional-dbh-effects-plot-sampling
       - articles/space-time-effects-plot-sampling
+  - title: Inventory studies
+    contents:
+      - articles/harvard-forest
   - title: internal
     contents:
       - articles/modeling-and-software-details

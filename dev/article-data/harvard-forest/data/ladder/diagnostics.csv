@@ -1,0 +1,26 @@
+scope,max_rhat,model
+Parameters,1.0009974652046187,H1
+Covariance and size,1,H1
+Combined intercepts,NA,H1
+Fitted densities,1.001260535406142,H1
+Population predictions,1.0064369439264713,H1
+Parameters,1.0090702580671125,H2
+Covariance and size,1,H2
+Combined intercepts,1.0007640687841115,H2
+Fitted densities,1.0014871749182244,H2
+Population predictions,1.0037519251119496,H2
+Parameters,1.0201562367048131,H3
+Covariance and size,1,H3
+Combined intercepts,1.0043203370473854,H3
+Fitted densities,1.0027256170878558,H3
+Population predictions,1.0067396018100054,H3
+Parameters,1.036137295994073,H4
+Covariance and size,1.0008629224035808,H4
+Combined intercepts,1.003200473914556,H4
+Fitted densities,1.002745219456114,H4
+Population predictions,1.0056026541610321,H4
+Parameters,1.0120661252893317,H5
+Covariance and size,1.0048334804722794,H5
+Combined intercepts,1.0027408845222978,H5
+Fitted densities,1.0029623185758898,H5
+Population predictions,1.0045448010839464,H5

@@ -59,3 +59,6 @@ zip::zipr(
 # Keep the website copy synchronized with the authoritative technical document.
 file.copy("../modeling_and_software_details/magComp.pdf",
           file.path(downloads, "magComp.pdf"), overwrite = TRUE)
+
+# Package the completed inventory study without rerunning its analyses.
+source("harvard-forest/build_article_data.R", chdir = TRUE)

@@ -476,38 +476,6 @@ static double rnormProbitLatent(double mean, int y)
   return mean - rstdnormLowerTrunc(-lower);
 }
 
-// N(mean, sd^2) restricted to (0, infinity). In the positive tail, draw
-// the excess above the truncation point directly to avoid cancellation.
-static double rnormPositive(double mean, double sd)
-{
-  double lower = -mean / sd;
-  if(!R_FINITE(mean) || !R_FINITE(sd) || sd <= 0.0 || !R_FINITE(lower))
-    magcomp::error("invalid positive-normal parameters");
-
-  if(lower <= 0.0){
-    double value;
-    do {
-      value = mean + sd * norm_rand();
-    } while(value <= 0.0);
-    return value;
-  }
-
-  double alpha = 0.5 * lower + 0.5 * std::hypot(lower, 2.0);
-  for(;;){
-    double u = unif_rand();
-    if(u <= 0.0)
-      continue;
-    double excess = -std::log(u) / alpha;
-    double difference = excess - 1.0 / alpha;
-    if(std::log(unif_rand()) <= -0.5 * difference * difference){
-      double value = sd * excess;
-      if(!R_FINITE(value) || value <= 0.0)
-        magcomp::error("positive-normal draw is outside the representable range");
-      return value;
-    }
-  }
-}
-
 static double drawProbitBinomialLatentSum(double eta,
                                           int successes,
                                           int trials,
@@ -668,6 +636,27 @@ static void enforceLoadingConstraints(std::vector<double>& loading,
     if(!R_FINITE(diagonal) || diagonal <= 0.0)
       magcomp::error("anchor diagonal loadings must be positive and finite");
   }
+}
+
+// Work with unrestricted normal anchor loadings, then orient each column.
+// The joint sign change preserves loading-score products and the centered
+// Gaussian priors, giving the same positive-anchor posterior. Fixed zeros
+// and covariance parameters are unchanged.
+static void orientLoadingSigns(CompositionFactorState& factor, int Jstick)
+{
+  for(int k = 0; k < factor.K; k++){
+    double diagonal = factor.loading[factor.anchorIndex[k] + k * Jstick];
+    if(!R_FINITE(diagonal) || diagonal == 0.0)
+      magcomp::error("anchor loading must be finite and nonzero before sign alignment");
+    if(diagonal < 0.0){
+      for(int j = 0; j < Jstick; j++)
+        factor.loading[j + k * Jstick] = -factor.loading[j + k * Jstick];
+      for(int g = 0; g < factor.nGroup; g++)
+        factor.factorScore[g + k * factor.nGroup] =
+          -factor.factorScore[g + k * factor.nGroup];
+    }
+  }
+  enforceLoadingConstraints(factor.loading, Jstick, factor.K, factor.anchorIndex);
 }
 
 static double compositionFactorEta(const AllocationBlockState& block,
@@ -3306,7 +3295,6 @@ static void updateAllocationFactor(AllocationBlockState& block,
                  factor.name.c_str(), c + 1, k + 1);
       }
       factor.loading[c + k * block.coefStick] =
-        c == factor.anchorIndex[k] ? rnormPositive(mean, sd) :
         mean + sd * Rf_rnorm(0.0, 1.0);
       if(!R_FINITE(factor.loading[c + k * block.coefStick])){
         magcomp::error("non-finite composition factor loading draw for term '%s', "
@@ -3315,8 +3303,7 @@ static void updateAllocationFactor(AllocationBlockState& block,
     }
   }
 
-  enforceLoadingConstraints(factor.loading, block.coefStick, factor.K,
-                            factor.anchorIndex);
+  orientLoadingSigns(factor, block.coefStick);
 
   if(factor.isSpatial){
     if(!factor.denseGp && factor.nngpGraph == NULL)

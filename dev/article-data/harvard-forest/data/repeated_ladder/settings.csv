@@ -1,0 +1,6 @@
+model,n_samples,n_burn,chains,thin,prediction_draws_per_chain,requested_layouts,complete_pairs,package_version
+H1,50000,20000,3,10,333,1000,1000,0.0.7
+H2,50000,20000,3,10,333,1000,1000,0.0.7
+H3,50000,20000,3,10,333,1000,1000,0.0.7
+H4,50000,20000,3,10,333,1000,1000,0.0.7
+H5,50000,20000,3,10,333,1000,1000,0.0.7

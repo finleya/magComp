@@ -1081,8 +1081,10 @@ use loadings \(\lambda_{jk}\) and scores \(w_{gk}\); for an iid term
 replace these with \(\gamma_{jk}\) and \(u_{gk}\). Here \(g(i)\) maps each
 allocation data row to its location or group.
 \begin{enumerate}[label=(\alph*),leftmargin=1.8em]
-\item Update estimated loadings one at a time, traversing loading rows and then
-factor columns. Let \(x_i=d_iw_{g(i),k}\) and
+\item Use a working parameterization in which anchor diagonals, like other
+estimated loadings, have unrestricted zero-mean normal priors. Keep the
+upper-anchor zeros. Update estimated loadings one at a time, traversing loading
+rows and then factor columns. Let \(x_i=d_iw_{g(i),k}\) and
 \(o_{ij}^{(-jk)}=\psi_{ij}-x_i\lambda_{jk}\). With prior variance
 \(c_\lambda\), calculate
 \begin{equation}
@@ -1092,14 +1094,28 @@ factor columns. Let \(x_i=d_iw_{g(i),k}\) and
                    \{h_{ij}-\omega_{ij}o_{ij}^{(-jk)}\}.
  \label{eq:loading-conditional-moments}
 \end{equation}
-Sample non-anchor-diagonal estimated entries from
-\(\Normal(m_{jk},V_{jk})\). For the \(k\)th anchor row \(a_k\), draw
+Draw every estimated working loading from
+\(\Normal(m_{jk},V_{jk})\). After completing the loading sweep, let
+\(s_k=\operatorname{sign}(\lambda_{a_k,k})\), where \(a_k\) is the
+\(k\)th anchor row, and jointly transform
 \begin{equation}
- \lambda_{a_k,k}\mid\cdot\sim\Normal(m_{a_k,k},V_{a_k,k})
-                      \ \text{restricted to }(0,\infty).
+ \lambda_{jk}\leftarrow s_k\lambda_{jk}\quad\text{for every }j,
+ \qquad
+ w_{gk}\leftarrow s_kw_{gk}\quad\text{for every }g.
  \label{eq:diagonal-loading-update}
 \end{equation}
-Use \(c_\gamma\) for iid terms.
+All anchor diagonals are then positive. For iid terms, use \(c_\gamma\),
+\(\gamma_{jk}\), and \(u_{gk}\).
+
+The joint sign transformation preserves every loading--score product,
+the likelihood, and the centered Gaussian priors. Folding the unrestricted
+posterior onto positive anchors gives exactly the specified half-normal
+diagonal priors, while preserving the other normal priors and fixed zeros.
+The Gaussian loading sweep is equivariant under these sign transformations,
+so following it by sign alignment preserves the identified posterior.
+This update allows coordinated changes in loadings and scores when an
+anchor loading is weakly determined. It does not change the factor model
+or its covariance parameters.
 \item For an iid term, update its \(K\)-vector of scores jointly within each
 group. Write \(\boldsymbol x_{ij}=d_i\bgamma_j\) and let
 \(o_{ij}^{(-t)}\) exclude the entire current factor term. Sum over valid
@@ -1212,7 +1228,7 @@ diagonal additions or conditional-variance floors.
 
 \subsection{Augmentation generators and Metropolis adaptation}
 
-Probit augmentation and positive loading diagonals use truncated-normal
+Probit augmentation uses truncated-normal
 rejection sampling, with an exponential envelope in the tail.
 
 Magnitude and logit-composition augmentation call \texttt{BayesLogit}'s hybrid

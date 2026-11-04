@@ -1,0 +1,6 @@
+input,reader_archive_paths,input_sha256
+inputs/census.csv,datasets/HF/HF_trees.shp; datasets/HF/HF_trees.dbf; datasets/HF/HF_trees.shx; datasets/HF/HF_trees.prj; datasets/HF/hf253-02-species-codes.csv,d090009e7aaca41bf07d49fdefcea95871e31479c4ab90135bbcbb714cc50c2a
+inputs/forest.gpkg,datasets/HF/HF_bounds.shp; datasets/HF/HF_bounds.dbf; datasets/HF/HF_bounds.shx; datasets/HF/HF_bounds.prj,599ad37d9dbf9aa828c7876f560a83400be9437af7c239c6a8adf84a45499fae
+inputs/strata.gpkg,datasets/HF/HF_stratified.shp; datasets/HF/HF_stratified.dbf; datasets/HF/HF_stratified.shx; datasets/HF/HF_stratified.prj,d39ab8ba9a5ed0ba527ba755b3ebdfeb61ffd82e95fbd627880fbbe923a95ee6
+inputs/canopy_height.tif,datasets/HF/HF_CHM.tif,1e9908aeaa030ef664c4da3f2bbec3f4ffd7704dab3676e4249a044582e92b84
+inputs/satellite.tif,datasets/HF/HF_GES.tif,0c35e050451af88fe6db1201bb42d6bb5818826c824719a5ea385dcc0f8488a0
