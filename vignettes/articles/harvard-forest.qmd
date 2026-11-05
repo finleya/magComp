@@ -49,15 +49,15 @@ Extract the archive and use its `harvard-forest` folder as your R working direct
 
 ## Census and sampled plots
 
-The 35-ha Harvard Forest CTFS–ForestGEO census contains mapped stem locations, species, and diameters, documented in the Harvard Forest Data Archive, HF253 [@orwig2023hf253]. We use the processed first-census data accompanying @finleyDoser2026, described in the book's [Harvard Forest data description](https://www.finley-lab.com/ifdar/overview#hf). We thank David Orwig, David Foster, and Aaron Ellison for making these census data available. Our population contains 20,258 living stems with diameter at breast height (DBH) at least 12.7 cm.
+The 35-ha Harvard Forest CTFS–ForestGEO census contains mapped stem locations, species, and diameters, documented in the Harvard Forest Data Archive, HF253 [@orwig2023hf253]. We use the processed first-census data accompanying @finleyDoser2026; see the [Harvard Forest data description](https://www.finley-lab.com/ifdar/overview#hf). Our population contains 20,258 living stems with diameter at breast height (DBH) at least 12.7 cm.
 
 We retain eastern hemlock, red maple, northern red oak, and eastern white pine separately, grouping the remaining species as Other. Six DBH classes give 30 species-by-DBH cells. Each class includes its lower endpoint and excludes its upper endpoint; `60+` includes all stems at least 60 cm DBH.
 
-The four supplied strata are reporting areas that we also use to model differences in density and composition. Strata 1 and 4 are mixed conifer–hardwood forest, stratum 2 is conifer-dominated, and stratum 3 is a sparsely forested wetland, as described in the book's [stratified-sampling example](https://www.finley-lab.com/ifdar/strat). We do not use environmental covariates in this study.
+The four supplied strata are reporting areas that we also use to model differences in density and composition. Strata 1 and 4 are mixed conifer–hardwood forest, stratum 2 is conifer-dominated, and stratum 3 is a sparsely forested wetland, as described in the [stratified-sampling example](https://www.finley-lab.com/ifdar/strat). We do not use environmental covariates in this study.
 
 ### Sample the forest
 
-We place circular plots of radius 9 m on a systematic grid with spacing about 88 m. A uniform random shift over one grid cell determines its position. The sampling frame extends 9 m beyond the forest boundary, allowing outside centers to sample trees inside the forest. This buffered-frame approach is illustrated in the book's [Section 17.7.2](https://www.finley-lab.com/ifdar/cluster#clusterHF). The strata are not sampled separately.
+We place circular plots of radius 9 m on a systematic grid with spacing about 88 m. A uniform random shift over one grid cell determines its position. The sampling frame extends 9 m beyond the forest boundary, allowing outside centers to sample trees inside the forest. This buffered-frame approach is illustrated in the [Harvard Forest biomass example](https://www.finley-lab.com/ifdar/cluster#clusterHF). The strata are not sampled separately.
 
 Plots are clipped to the forest and split where they cross stratum boundaries. Each positive-area portion supplies its own counts and area, including portions with zero trees. All five models use these same observations. The first layout uses `set.seed(1)`; the preparation code in `sample_functions.R` shows the random shift, clipping, and counting steps.
 
@@ -74,7 +74,7 @@ library(tidyverse)
 #| code-fold: true
 #| code-summary: "Show plotting code"
 #| fig-height: 5
-#| fig-cap: "The four strata over the book's satellite image, with black plot centers and orange circles showing the 9-m-radius plot extents. Only portions inside the forest are sampled; some plots intersect more than one stratum."
+#| fig-cap: "The four strata over satellite imagery, with black plot centers and orange circles showing the 9-m-radius plot extents. Only portions inside the forest are sampled; some plots intersect more than one stratum."
 library(sf)
 library(terra)
 library(tidyterra)
@@ -87,7 +87,7 @@ plot_extents <- st_buffer(centers, dist = 9)
 
 ggplot() +
   geom_spatraster_rgb(data = imagery, r = 1, g = 2, b = 3) +
-  geom_sf(data = strata, aes(fill = factor(stratum_id)), color = "white", alpha = 0.2) +
+  geom_sf(data = strata, aes(fill = factor(stratum_id)), color = "white", alpha = 0.45) +
   geom_sf(data = plot_extents, fill = NA, color = "darkorange", linewidth = 0.5) +
   geom_sf(data = centers, color = "black", size = 0.7) +
   scale_fill_brewer(palette = "Pastel1", name = "Stratum") +
@@ -398,7 +398,7 @@ cv_strata |>
   knitr::kable(col.names = c("Stratum", "Portions", paste0("H", 1:5)))
 ```
 
-H5 has the lowest RMSPE in strata 2 and 4, while H2 has the lowest in strata 1 and 3. In the wetland stratum, adding stratum effects accounts for most of the improvement. Strata 1 and 3 have only two and three sampled portions, respectively, so their CV scores describe very few locations. These comparisons concern withheld portions; the following sections assess estimates for the full forest and strata against the census.
+H5 has the lowest RMSPE in strata 2 and 4, while H2 has the lowest in strata 1 and 3. In the wetland stratum, adding stratum effects accounts for most of the improvement. Strata 1 and 3 have only two and three sampled portions, respectively, so these CV scores provide limited evidence for choosing among models. They assess prediction at withheld portions. The [census comparisons](#compare-estimates-with-the-census) below assess full-stratum estimates for this inventory, and the [repeated-sampling study](#repeated-sampling-of-the-same-forest) evaluates their estimation error and interval coverage across 1,000 layouts.
 
 ## Predict the unsampled forest
 

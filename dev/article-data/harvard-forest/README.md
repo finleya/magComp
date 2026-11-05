@@ -56,7 +56,7 @@ Fits and predictions are saved in `output/repeated_ladder/`; the article reads c
 |---|---|
 | `inputs/census.csv` | Original processed census records, including stem identifiers, coordinates, species, DBH, biomass, and status. |
 | `inputs/forest.gpkg`, `inputs/strata.gpkg` | The 35-ha forest and four strata. |
-| `inputs/satellite.tif` | The book's georeferenced satellite image, used as the map background. |
+| `inputs/satellite.tif` | Georeferenced satellite image used as the map background. |
 | `inputs/canopy_height.tif` | Source canopy-height raster; not used in these models. |
 | `data/population.csv` | Eligible living stems assigned to strata. |
 | `data/stratum_areas.csv` | Full polygon areas in hectares. |
@@ -92,6 +92,6 @@ To regenerate the prepared census and map inputs, run `source("prepare_data.R")`
 
 Finley, A. O. and Doser, J. W. (2026). *Introduction to Forestry Data Analysis with R*. Chapman & Hall/CRC. [Book](https://ifdar-book.org/), [DOI](https://doi.org/10.1201/9781003222699). The buffered-frame approach is illustrated in [Section 17.7.2](https://www.finley-lab.com/ifdar/cluster#clusterHF).
 
-Orwig, D., Foster, D., and Ellison, A. (2023). *Harvard Forest CTFS-ForestGEO Mapped Forest Plot since 2014*. Harvard Forest Data Archive: HF253 (v.6). Environmental Data Initiative. [DOI: 10.6073/pasta/818789a882a318c1d7f3fc43a2289e12](https://doi.org/10.6073/pasta/818789a882a318c1d7f3fc43a2289e12). This is the citation supplied by the [data archive](https://harvardforest1.fas.harvard.edu/exist/apps/datasets/showData.html?id=HF253); the inputs here are the book's processed first-census data. We thank David Orwig, David Foster, and Aaron Ellison for making these data available. The archive releases its data under CC0 and requests acknowledgment of the creators.
+Orwig, D., Foster, D., and Ellison, A. (2023). *Harvard Forest CTFS-ForestGEO Mapped Forest Plot since 2014*. Harvard Forest Data Archive: HF253 (v.6). Environmental Data Initiative. [DOI: 10.6073/pasta/818789a882a318c1d7f3fc43a2289e12](https://doi.org/10.6073/pasta/818789a882a318c1d7f3fc43a2289e12). This is the citation supplied by the [data archive](https://harvardforest1.fas.harvard.edu/exist/apps/datasets/showData.html?id=HF253); the inputs here are the book's processed first-census data. The archive releases its data under CC0 and requests acknowledgment of the creators.
 
 The census, boundaries, and canopy-height raster came from the reader archive `IFDAR_book.zip` at book-repository commit `15cb88419a79855c032e0a78109a8a4ac1188076`. Archive SHA-256: `dc569b72b742adfdfba3c591e3cc3a0d1db40cabc791d30c0934a04a7fe4a1bf`. The satellite image is the book's `datasets/HF/HF_GES.tif`. `sources.csv` records the source paths and checksums.
