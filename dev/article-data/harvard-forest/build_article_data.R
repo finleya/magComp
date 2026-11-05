@@ -8,6 +8,7 @@ files <- c("inputs", data_files, "prepare_data.R", "prepare_sample.R",
            "read_inputs.R", "sample_functions.R", "population_summaries.R",
            "ladder_settings.R", "ladder_functions.R", "repeat_ladder.R",
            "summarize_ladder_repetitions.R", "export_ladder_example.R",
+           "cross_validate_ladder.R", "summarize_ladder_cv.R",
            "README.md", "sources.csv")
 
 # The archive opens into one folder and contains no saved fits or run logs.

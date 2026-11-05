@@ -18,6 +18,21 @@ The first four runner arguments are the first layout, last layout, number of con
 
 The five models share the same counts and areas. H1 uses common intercepts. H2 adds a magnitude stratum random effect and a species stratum factor. H3 also adds a stratum factor in conditional DBH allocation. H4 adds a magnitude spatial effect; H5 also adds a species spatial factor. All composition process terms use one factor; spatial terms use NNGPs with 15 neighbors. No environmental covariates or DBH smoothing are used. Negative-binomial size is estimated in H1 and fixed at 1,000 in H2–H5.
 
+## Cross-validation of the first inventory
+
+Leave-one-plot-out cross-validation withholds each of the 48 physical plots in turn. Portions of a plot crossing stratum boundaries are withheld together. `magCompCV()` refits each model and generates posterior predictive counts for the omitted portions, using the same three-chain settings as above. Predictions use all 3,000 retained draws per chain.
+
+```sh
+for model in H1 H2 H3 H4 H5; do
+  Rscript cross_validate_ladder.R "$model" 3
+done
+Rscript summarize_ladder_cv.R
+```
+
+The second argument specifies cores per fit. The commands above run models sequentially; they can also be run in separate terminals. Fits and prediction draws are saved in `output/cv/`. Summaries in `data/cv/` recombine portion counts within each draw and divide by the plot's sampled area. The table compares predicted and observed species-by-DBH densities, with equal weight for each of the 48 × 30 plot cells. `diagnostics.csv` records the parameter with the largest R-hat in each fit. This assesses prediction of withheld observations from the first inventory; the repeated-sampling experiment below assesses forest and stratum estimates against the census.
+
+`portion_predictions.csv` retains the held-out density summaries for each stratum portion, using its own sampled area. `stratum_summary.csv` reports mean error, RMSPE, interval coverage, and interval width by model and stratum, with equal weight for each portion's 30 category cells. The article displays RMSPE and coverage alongside the number of sampled portions. These are prediction scores within strata, not estimates of stratum totals.
+
 ## Repeat the sampling
 
 The census remains fixed while a random shift changes the systematic plot grid. The included results cover 1,000 layouts. To reproduce the experiment with four layouts in parallel and three cores per fit:
@@ -50,6 +65,7 @@ Fits and predictions are saved in `output/repeated_ladder/`; the article reads c
 | `data/ladder/trees.csv`, `data/ladder/prediction.csv` | Model inputs with actual portion areas and spatial coordinates. |
 | `data/area_summary.csv`, `data/truth.csv` | Sampled and unsampled areas, and census species-by-DBH counts and densities. |
 | `data/ladder/` | First-inventory estimates, chain diagnostics, and settings. |
+| `data/cv/` | Plot exclusions, held-out density summaries, predictive scores, and parameter diagnostics. |
 | `data/repeated_ladder/` | Repeated-sampling performance and run accounting. |
 
 Species groups are hemlock, red maple, red oak, white pine, and Other. DBH classes are [12.7,20), [20,30), [30,40), [40,50), [50,60), and [60,∞) cm. Each sampled portion has all 30 count cells, including zeros. `plot_id` identifies a circular plot; `unit_id` identifies its stratum portion.
@@ -64,6 +80,7 @@ Each population-count draw adds the known sampled count to a joint posterior pre
 | `read_inputs.R`, `sample_functions.R` | Read spatial inputs, place each grid, count trees, and construct unsampled portions. |
 | `ladder_settings.R` | MCMC lengths, thinning, prediction draws, and convergence checks. |
 | `ladder_functions.R` | Five model formulas, fitting, and diagnostics. |
+| `cross_validate_ladder.R`, `summarize_ladder_cv.R` | Leave-one-plot-out fitting and predictive assessment for the first inventory. |
 | `population_summaries.R` | Joint prediction and observed-plus-predicted count aggregation. |
 | `repeat_ladder.R` | Run layouts and save fits, attempts, and results. |
 | `summarize_ladder_repetitions.R` | Calculate repeated-sampling metrics and Monte Carlo standard errors. |

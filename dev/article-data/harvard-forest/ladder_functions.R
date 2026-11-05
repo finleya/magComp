@@ -20,9 +20,7 @@ make_ladder_inventory <- function(repetition) {
   inventory[c("plots", "trees", "prediction", "area_summary")]
 }
 
-fit_ladder_model <- function(trees, model, control) {
-  dat <- magCompData(trees, unit = unit_id, categories = c(species, dbh_class),
-                     tree_count = count, design = fixedArea(area_ha))
+ladder_formulas <- function(model) {
   magnitude <- list(
     H1 = ~ 1,
     H2 = ~ 1 + iid(stratum_id, name = "stratum"),
@@ -42,9 +40,16 @@ fit_ladder_model <- function(trees, model, control) {
   )
   dbh <- if (model %in% c("H1", "H2")) dbh_class | species ~ 1 else
     dbh_class | species ~ 1 + factor_iid(stratum_id, K = 1, name = "stratum")
-  magComp(dat, magnitude = magnitude[[model]],
-           composition = magCompComposition(species_models[[model]], dbh),
-           control = control)
+  list(magnitude = magnitude[[model]],
+       composition = magCompComposition(species_models[[model]], dbh))
+}
+
+fit_ladder_model <- function(trees, model, control) {
+  dat <- magCompData(trees, unit = unit_id, categories = c(species, dbh_class),
+                     tree_count = count, design = fixedArea(area_ha))
+  formulas <- ladder_formulas(model)
+  magComp(dat, magnitude = formulas$magnitude,
+           composition = formulas$composition, control = control)
 }
 
 # Classical unsplit R-hat, matching the package. A common constant has no

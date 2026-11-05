@@ -2344,8 +2344,15 @@ window.Quarto = {
 </header>
 
 
-<p>Our objective is to estimate species-by-DBH stand tables for a forest and its strata from a sparse plot inventory, and understand how model structure affects the estimates and their uncertainty. We add stratum and spatial effects in stages, use magComp to predict counts in unsampled areas, and combine these predictions with observed counts to form stand tables. A mapped census of Harvard Forest provides known values for comparison. Repeating the sampling lets us assess whether estimates tend to run high or low and how often their intervals contain the census values.</p>
-<p>The <a href="full-model-plot-sampling.html">species-by-DBH article</a> introduces the model using simulated data. Here the population is a real forest, with features that our models may not fully describe. The census provides known targets for assessment; only trees in the sampled plots enter model fitting.</p>
+<p>This article examines how model structure affects species-by-DBH stand-table estimates and their uncertainty when only a small part of a forest is sampled. A mapped census of Harvard Forest provides known values for the forest and its four strata. We use sampled plots to fit the models and the census to assess their estimates.</p>
+<p>We work through four steps:</p>
+<ol type="1">
+<li><strong>Fit models to one inventory.</strong> Starting with common intercepts, we add stratum and spatial effects in stages and compare fitted counts with observations.</li>
+<li><strong>Assess prediction at held-out plots.</strong> Cross-validation shows how well each model predicts plots excluded from fitting.</li>
+<li><strong>Estimate forest and stratum stand tables.</strong> We predict counts in unsampled areas, add the observed counts, and compare density estimates and intervals with the census.</li>
+<li><strong>Repeat the sampling.</strong> Across 1,000 plot layouts in the same forest, we assess estimation error, interval coverage, and interval width. This shows whether conclusions from one inventory hold as the sampled locations change.</li>
+</ol>
+<p>The <a href="full-model-plot-sampling.html">species-by-DBH article</a> introduces the model using simulated data. Here the population is a real forest, with features that our models may not fully describe. The aim is to understand what additional model structure contributes to the quantities we want to estimate, and where sparse observations still limit inference.</p>
 <div class="alert alert-info" role="note">
 <p><strong>Example data and analysis</strong></p>
 <p><a href="downloads/harvard-forest.zip" class="btn btn-primary" download="harvard-forest.zip">Download the Harvard Forest data (ZIP)</a></p>
@@ -2363,26 +2370,31 @@ window.Quarto = {
 <p>We begin by reading the polygons and satellite image, then show the strata, plot centers, and plot extents over the forest canopy.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(magComp)</span>
-<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span>
-<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sf)</span>
-<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(terra)</span>
-<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyterra)</span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>forest <span class="ot">&lt;-</span> <span class="fu">st_read</span>(<span class="st">&quot;inputs/forest.gpkg&quot;</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a>strata <span class="ot">&lt;-</span> <span class="fu">st_read</span>(<span class="st">&quot;inputs/strata.gpkg&quot;</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a>centers <span class="ot">&lt;-</span> <span class="fu">st_read</span>(<span class="st">&quot;data/plot_centers.gpkg&quot;</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>imagery <span class="ot">&lt;-</span> <span class="fu">rast</span>(<span class="st">&quot;inputs/satellite.tif&quot;</span>)</span>
-<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>plot_extents <span class="ot">&lt;-</span> <span class="fu">st_buffer</span>(centers, <span class="at">dist =</span> <span class="dv">9</span>)</span>
-<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>() <span class="sc">+</span></span>
-<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_spatraster_rgb</span>(<span class="at">data =</span> imagery, <span class="at">r =</span> <span class="dv">1</span>, <span class="at">g =</span> <span class="dv">2</span>, <span class="at">b =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_sf</span>(<span class="at">data =</span> strata, <span class="fu">aes</span>(<span class="at">fill =</span> <span class="fu">factor</span>(stratum_id)), <span class="at">color =</span> <span class="st">&quot;white&quot;</span>, <span class="at">alpha =</span> <span class="fl">0.2</span>) <span class="sc">+</span></span>
-<span id="cb1-16"><a href="#cb1-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_sf</span>(<span class="at">data =</span> plot_extents, <span class="at">fill =</span> <span class="cn">NA</span>, <span class="at">color =</span> <span class="st">&quot;darkorange&quot;</span>, <span class="at">linewidth =</span> <span class="fl">0.5</span>) <span class="sc">+</span></span>
-<span id="cb1-17"><a href="#cb1-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_sf</span>(<span class="at">data =</span> centers, <span class="at">color =</span> <span class="st">&quot;black&quot;</span>, <span class="at">size =</span> <span class="fl">0.7</span>) <span class="sc">+</span></span>
-<span id="cb1-18"><a href="#cb1-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_brewer</span>(<span class="at">palette =</span> <span class="st">&quot;Pastel1&quot;</span>, <span class="at">name =</span> <span class="st">&quot;Stratum&quot;</span>) <span class="sc">+</span></span>
-<span id="cb1-19"><a href="#cb1-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">guides</span>(<span class="at">fill =</span> <span class="fu">guide_legend</span>(<span class="at">override.aes =</span> <span class="fu">list</span>(<span class="at">alpha =</span> <span class="dv">1</span>))) <span class="sc">+</span></span>
-<span id="cb1-20"><a href="#cb1-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_sf</span>(<span class="at">datum =</span> <span class="cn">NA</span>) <span class="sc">+</span></span>
-<span id="cb1-21"><a href="#cb1-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_void</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyverse)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<div class="cell">
+<details class="code-fold">
+<summary>Show plotting code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sf)</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(terra)</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(tidyterra)</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>forest <span class="ot">&lt;-</span> <span class="fu">st_read</span>(<span class="st">&quot;inputs/forest.gpkg&quot;</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>strata <span class="ot">&lt;-</span> <span class="fu">st_read</span>(<span class="st">&quot;inputs/strata.gpkg&quot;</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>centers <span class="ot">&lt;-</span> <span class="fu">st_read</span>(<span class="st">&quot;data/plot_centers.gpkg&quot;</span>, <span class="at">quiet =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>imagery <span class="ot">&lt;-</span> <span class="fu">rast</span>(<span class="st">&quot;inputs/satellite.tif&quot;</span>)</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>plot_extents <span class="ot">&lt;-</span> <span class="fu">st_buffer</span>(centers, <span class="at">dist =</span> <span class="dv">9</span>)</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>() <span class="sc">+</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_spatraster_rgb</span>(<span class="at">data =</span> imagery, <span class="at">r =</span> <span class="dv">1</span>, <span class="at">g =</span> <span class="dv">2</span>, <span class="at">b =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_sf</span>(<span class="at">data =</span> strata, <span class="fu">aes</span>(<span class="at">fill =</span> <span class="fu">factor</span>(stratum_id)), <span class="at">color =</span> <span class="st">&quot;white&quot;</span>, <span class="at">alpha =</span> <span class="fl">0.2</span>) <span class="sc">+</span></span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_sf</span>(<span class="at">data =</span> plot_extents, <span class="at">fill =</span> <span class="cn">NA</span>, <span class="at">color =</span> <span class="st">&quot;darkorange&quot;</span>, <span class="at">linewidth =</span> <span class="fl">0.5</span>) <span class="sc">+</span></span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_sf</span>(<span class="at">data =</span> centers, <span class="at">color =</span> <span class="st">&quot;black&quot;</span>, <span class="at">size =</span> <span class="fl">0.7</span>) <span class="sc">+</span></span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_fill_brewer</span>(<span class="at">palette =</span> <span class="st">&quot;Pastel1&quot;</span>, <span class="at">name =</span> <span class="st">&quot;Stratum&quot;</span>) <span class="sc">+</span></span>
+<span id="cb2-17"><a href="#cb2-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">guides</span>(<span class="at">fill =</span> <span class="fu">guide_legend</span>(<span class="at">override.aes =</span> <span class="fu">list</span>(<span class="at">alpha =</span> <span class="dv">1</span>))) <span class="sc">+</span></span>
+<span id="cb2-18"><a href="#cb2-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_sf</span>(<span class="at">datum =</span> <span class="cn">NA</span>) <span class="sc">+</span></span>
+<span id="cb2-19"><a href="#cb2-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_void</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2395,17 +2407,17 @@ window.Quarto = {
 <p>The 48 plots yield 52 stratum portions and 735 observed stems. <code>plot_id</code> identifies an original circle; <code>unit_id</code> identifies a portion used in fitting. Each portion has 30 rows, including empty species-by-DBH cells. For the spatial models, coordinates in kilometers locate the centroid of each sampled portion.</p>
 <p>We read these counts and define the category order.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>species_order <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;Hemlock&quot;</span>, <span class="st">&quot;Red maple&quot;</span>, <span class="st">&quot;Red oak&quot;</span>, <span class="st">&quot;White pine&quot;</span>, <span class="st">&quot;Other&quot;</span>)</span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>dbh_classes <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;12.7-20&quot;</span>, <span class="st">&quot;20-30&quot;</span>, <span class="st">&quot;30-40&quot;</span>, <span class="st">&quot;40-50&quot;</span>, <span class="st">&quot;50-60&quot;</span>, <span class="st">&quot;60+&quot;</span>)</span>
-<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>trees <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/trees.csv&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">species =</span> <span class="fu">factor</span>(species, <span class="at">levels =</span> species_order),</span>
-<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>         <span class="at">dbh_class =</span> <span class="fu">ordered</span>(dbh_class, <span class="at">levels =</span> dbh_classes))</span>
-<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>trees <span class="sc">|&gt;</span></span>
-<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(unit_id, plot_id, stratum_id, area_ha, species, dbh_class, count) <span class="sc">|&gt;</span></span>
-<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>() <span class="sc">|&gt;</span></span>
-<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">4</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>species_order <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;Hemlock&quot;</span>, <span class="st">&quot;Red maple&quot;</span>, <span class="st">&quot;Red oak&quot;</span>, <span class="st">&quot;White pine&quot;</span>, <span class="st">&quot;Other&quot;</span>)</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>dbh_classes <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="st">&quot;12.7-20&quot;</span>, <span class="st">&quot;20-30&quot;</span>, <span class="st">&quot;30-40&quot;</span>, <span class="st">&quot;40-50&quot;</span>, <span class="st">&quot;50-60&quot;</span>, <span class="st">&quot;60+&quot;</span>)</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>trees <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/trees.csv&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">species =</span> <span class="fu">factor</span>(species, <span class="at">levels =</span> species_order),</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>         <span class="at">dbh_class =</span> <span class="fu">ordered</span>(dbh_class, <span class="at">levels =</span> dbh_classes))</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>trees <span class="sc">|&gt;</span></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(unit_id, plot_id, stratum_id, area_ha, species, dbh_class, count) <span class="sc">|&gt;</span></span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">head</span>() <span class="sc">|&gt;</span></span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">4</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output-display">
 <table class="caption-top table table-sm table-striped small">
 <thead>
@@ -2480,13 +2492,13 @@ window.Quarto = {
 </div>
 <p>The area summary shows how little information is available for some strata.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb3"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a>area_summary <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/area_summary.csv&quot;</span>)</span>
-<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>area_summary <span class="sc">|&gt;</span></span>
-<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(stratum_id, area_ha, plot_portions, sampled_area_ha, sampled_percent) <span class="sc">|&gt;</span></span>
-<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>, <span class="at">col.names =</span> <span class="fu">c</span>(</span>
-<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;Stratum&quot;</span>, <span class="st">&quot;Area (ha)&quot;</span>, <span class="st">&quot;Plot portions&quot;</span>, <span class="st">&quot;Sampled (ha)&quot;</span>, <span class="st">&quot;Sampled (%)&quot;</span></span>
-<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>  ))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>area_summary <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/area_summary.csv&quot;</span>)</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>area_summary <span class="sc">|&gt;</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(stratum_id, area_ha, plot_portions, sampled_area_ha, sampled_percent) <span class="sc">|&gt;</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>, <span class="at">col.names =</span> <span class="fu">c</span>(</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;Stratum&quot;</span>, <span class="st">&quot;Area (ha)&quot;</span>, <span class="st">&quot;Plot portions&quot;</span>, <span class="st">&quot;Sampled (ha)&quot;</span>, <span class="st">&quot;Sampled (%)&quot;</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>  ))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output-display">
 <table class="caption-top table table-sm table-striped small">
 <thead>
@@ -2596,26 +2608,26 @@ window.Quarto = {
 <h3 class="anchored" data-anchor-id="fit-the-models">Fit the models</h3>
 <p>The same data object supplies the portion areas and counts to all five fits.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">magCompData</span>(</span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  trees, <span class="at">unit =</span> unit_id, <span class="at">categories =</span> <span class="fu">c</span>(species, dbh_class),</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">tree_count =</span> count, <span class="at">design =</span> <span class="fu">fixedArea</span>(area_ha)</span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>dat <span class="ot">&lt;-</span> <span class="fu">magCompData</span>(</span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  trees, <span class="at">unit =</span> unit_id, <span class="at">categories =</span> <span class="fu">c</span>(species, dbh_class),</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">tree_count =</span> count, <span class="at">design =</span> <span class="fu">fixedArea</span>(area_ha)</span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
-<p>Each model uses three chains of 50,000 iterations. We discard the first 20,000 and retain every tenth draw, leaving 3,000 draws per chain. Prediction uses 333 of these draws per chain, or 999 in total. The conditional DBH factor has many loadings supported by just four strata, so we inspect both its parameters and the fitted quantities they determine.</p>
+<p>Each model uses three chains of 50,000 iterations. We discard the first 20,000 and retain every tenth draw, leaving 3,000 draws per chain. Forest and stratum predictions use 333 of these draws per chain, or 999 in total. The conditional DBH factor has many loadings supported by just four strata, so we inspect both its parameters and the fitted quantities they determine.</p>
 <p>We first fit H1, estimating negative-binomial size using its default prior. <code>n_cores = 3</code> runs the chains in parallel, with one computational thread per chain.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a>h1 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>  dat, <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span>,</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span>,</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>h1 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  dat, <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span>,</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span>,</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span></span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <p>H2–H5 fix negative-binomial size at 1,000 and model most extra count variation through magnitude random effects. Thus the comparison with H1 changes both the dependence structure and the treatment of count dispersion.</p>
 <p>The study fits these models through <code>ladder_functions.R</code> in the download. Expand the calls below to see how H2–H4 add the terms listed in the model table.</p>
@@ -2624,20 +2636,20 @@ window.Quarto = {
 H2: add stratum effects to magnitude and species allocation
 </summary>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>h2 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  dat,</span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">iid</span>(stratum_id, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
-<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
-<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span></span>
-<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
-<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
-<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
-<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
-<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>h2 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  dat,</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">iid</span>(stratum_id, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 </details>
 <details>
@@ -2645,21 +2657,21 @@ H2: add stratum effects to magnitude and species allocation
 H3: also add a stratum factor to DBH allocation within species
 </summary>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a>h3 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
-<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>  dat,</span>
-<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">iid</span>(stratum_id, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
-<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
-<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
-<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
-<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
-<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>)</span>
-<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
-<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
-<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
-<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
-<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>h3 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  dat,</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">iid</span>(stratum_id, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>)</span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 </details>
 <details>
@@ -2667,44 +2679,44 @@ H3: also add a stratum factor to DBH allocation within species
 H4: also add a spatial effect to magnitude
 </summary>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a>h4 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>  dat,</span>
-<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">iid</span>(stratum_id, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>) <span class="sc">+</span></span>
-<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">nngp</span>(easting_km, northing_km, <span class="at">m =</span> <span class="dv">15</span>, <span class="at">name =</span> <span class="st">&quot;space&quot;</span>),</span>
-<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
-<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
-<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
-<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
-<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>)</span>
-<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
-<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
-<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
-<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
-<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-</details>
-<p>H5 adds a spatial factor to species allocation, completing the five-model sequence.</p>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>h5 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>h4 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
 <span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>  dat,</span>
 <span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">iid</span>(stratum_id, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>) <span class="sc">+</span></span>
 <span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">nngp</span>(easting_km, northing_km, <span class="at">m =</span> <span class="dv">15</span>, <span class="at">name =</span> <span class="st">&quot;space&quot;</span>),</span>
 <span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
 <span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
-<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>) <span class="sc">+</span></span>
-<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_nngp</span>(easting_km, northing_km, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">m =</span> <span class="dv">15</span>,</span>
-<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>                  <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;space&quot;</span>),</span>
-<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
-<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>)</span>
-<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>  ),</span>
-<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
-<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
-<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
-<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
-<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>),</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>)</span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+</details>
+<p>H5 adds a spatial factor to species allocation, completing the five-model sequence.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a>h5 <span class="ot">&lt;-</span> <span class="fu">magComp</span>(</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>  dat,</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">magnitude =</span> <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span> <span class="fu">iid</span>(stratum_id, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>) <span class="sc">+</span></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    <span class="fu">nngp</span>(easting_km, northing_km, <span class="at">m =</span> <span class="dv">15</span>, <span class="at">name =</span> <span class="st">&quot;space&quot;</span>),</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">composition =</span> <span class="fu">magCompComposition</span>(</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>    species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>) <span class="sc">+</span></span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_nngp</span>(easting_km, northing_km, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">m =</span> <span class="dv">15</span>,</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>                  <span class="at">anchors =</span> <span class="st">&quot;Hemlock&quot;</span>, <span class="at">name =</span> <span class="st">&quot;space&quot;</span>),</span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a>    dbh_class <span class="sc">|</span> species <span class="sc">~</span> <span class="dv">1</span> <span class="sc">+</span></span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>      <span class="fu">factor_iid</span>(stratum_id, <span class="at">K =</span> <span class="dv">1</span>, <span class="at">name =</span> <span class="st">&quot;stratum&quot;</span>)</span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>  ),</span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>,</span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_thin =</span> <span class="dv">10</span>, <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>,</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a>    <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>, <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <p>Default priors and starting values are used throughout. Hemlock anchors the species factors; the conditional DBH factor uses the automatic anchor choice among species-by-DBH splits.</p>
 </section>
@@ -2712,93 +2724,22 @@ H4: also add a spatial effect to magnitude
 <h3 class="anchored" data-anchor-id="check-chain-agreement-and-fitted-values">Check chain agreement and fitted values</h3>
 <p><code>summary()</code> reports parameter estimates, intervals, R-hat, and effective sample size. <code>plot()</code> shows parameter chains. For random-intercept models, the global intercept and random effects can trade off while their sum is stable. <code>samples(type = &quot;combined&quot;)</code> adds the regression intercept to the process contributions at each observed unit. Its output also has <code>summary()</code> and <code>plot()</code> methods.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(h5)</span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Keep 1,000 draws per chain for the combined-intercept diagnostics.</span></span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>combined <span class="ot">&lt;-</span> <span class="fu">samples</span>(h5, <span class="at">type =</span> <span class="st">&quot;combined&quot;</span>, <span class="at">thin =</span> <span class="dv">3</span>)</span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(<span class="fu">summary</span>(combined))</span>
-<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(h5, <span class="at">parameters =</span> <span class="st">&quot;(Intercept)&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>We check the combined intercepts, fitted cell densities, and population predictions as well as the covariance parameters. The table reports the largest R-hat for each diagnostic category, using 1,000 retained draws per chain for fitting diagnostics and 333 per chain for population summaries. R-hat near one indicates agreement between chains. Inspecting their traces remains useful because chains can agree while exploring only part of a posterior.</p>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a>chain_checks <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/diagnostics.csv&quot;</span>)</span>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb11"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="fu">summary</span>(h5)</span>
 <span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>chain_checks <span class="sc">|&gt;</span></span>
-<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_wider</span>(<span class="at">names_from =</span> scope, <span class="at">values_from =</span> max_rhat) <span class="sc">|&gt;</span></span>
-<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">3</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output-display">
-<table class="caption-top table table-sm table-striped small">
-<colgroup>
-<col style="width: 6%">
-<col style="width: 11%">
-<col style="width: 20%">
-<col style="width: 20%">
-<col style="width: 17%">
-<col style="width: 23%">
-</colgroup>
-<thead>
-<tr class="header">
-<th style="text-align: left;">model</th>
-<th style="text-align: right;">Parameters</th>
-<th style="text-align: right;">Covariance and size</th>
-<th style="text-align: right;">Combined intercepts</th>
-<th style="text-align: right;">Fitted densities</th>
-<th style="text-align: right;">Population predictions</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td style="text-align: left;">H1</td>
-<td style="text-align: right;">1.001</td>
-<td style="text-align: right;">1.000</td>
-<td style="text-align: right;">NA</td>
-<td style="text-align: right;">1.001</td>
-<td style="text-align: right;">1.006</td>
-</tr>
-<tr class="even">
-<td style="text-align: left;">H2</td>
-<td style="text-align: right;">1.009</td>
-<td style="text-align: right;">1.000</td>
-<td style="text-align: right;">1.001</td>
-<td style="text-align: right;">1.001</td>
-<td style="text-align: right;">1.004</td>
-</tr>
-<tr class="odd">
-<td style="text-align: left;">H3</td>
-<td style="text-align: right;">1.020</td>
-<td style="text-align: right;">1.000</td>
-<td style="text-align: right;">1.004</td>
-<td style="text-align: right;">1.003</td>
-<td style="text-align: right;">1.007</td>
-</tr>
-<tr class="even">
-<td style="text-align: left;">H4</td>
-<td style="text-align: right;">1.036</td>
-<td style="text-align: right;">1.001</td>
-<td style="text-align: right;">1.003</td>
-<td style="text-align: right;">1.003</td>
-<td style="text-align: right;">1.006</td>
-</tr>
-<tr class="odd">
-<td style="text-align: left;">H5</td>
-<td style="text-align: right;">1.012</td>
-<td style="text-align: right;">1.005</td>
-<td style="text-align: right;">1.003</td>
-<td style="text-align: right;">1.003</td>
-<td style="text-align: right;">1.005</td>
-</tr>
-</tbody>
-</table>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Keep 1,000 draws per chain for the combined-intercept diagnostics.</span></span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a>combined <span class="ot">&lt;-</span> <span class="fu">samples</span>(h5, <span class="at">type =</span> <span class="st">&quot;combined&quot;</span>, <span class="at">thin =</span> <span class="dv">3</span>)</span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a><span class="fu">head</span>(<span class="fu">summary</span>(combined))</span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(h5, <span class="at">parameters =</span> <span class="st">&quot;(Intercept)&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
-</div>
-<p>The largest parameter R-hat is 1.036 for H4’s magnitude intercept. Its combined intercepts have maximum R-hat 1.003, illustrating the tradeoff between an intercept and its random effects. The covariance, fitted-density, and prediction diagnostics are also close to one.</p>
 <p>We check the magnitude component by comparing observed total tree counts with fitted mean total counts. Each point represents one of the 52 sampled portions, with counts summed over all species and DBH classes. <code>fitted()</code> returns expected category counts at these portions; summing the categories gives the fitted total.</p>
 <div class="cell">
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb12"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a>h5_fitted <span class="ot">&lt;-</span> <span class="fu">fitted</span>(h5, <span class="at">target =</span> <span class="st">&quot;expected&quot;</span>, <span class="at">type =</span> <span class="st">&quot;count&quot;</span>, <span class="at">summary =</span> <span class="st">&quot;mean&quot;</span>)</span>
 <span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>h5_fitted_totals <span class="ot">&lt;-</span> <span class="fu">rowSums</span>(h5_fitted<span class="sc">$</span>count)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <div class="cell">
+<details class="code-fold">
+<summary>Show plotting code</summary>
 <div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>fitted_counts <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/fitted_counts.csv&quot;</span>)</span>
 <span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a>model_colors <span class="ot">&lt;-</span> <span class="fu">c</span>(<span class="at">H1 =</span> <span class="st">&quot;#999999&quot;</span>, <span class="at">H2 =</span> <span class="st">&quot;#0072B2&quot;</span>, <span class="at">H3 =</span> <span class="st">&quot;#009E73&quot;</span>,</span>
 <span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a>                  <span class="at">H4 =</span> <span class="st">&quot;#E69F00&quot;</span>, <span class="at">H5 =</span> <span class="st">&quot;#CC79A7&quot;</span>)</span>
@@ -2812,6 +2753,7 @@ H4: also add a spatial effect to magnitude
 <span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">coord_equal</span>(<span class="at">xlim =</span> <span class="fu">c</span>(<span class="dv">0</span>, count_limit), <span class="at">ylim =</span> <span class="fu">c</span>(<span class="dv">0</span>, count_limit)) <span class="sc">+</span></span>
 <span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;Observed total count&quot;</span>, <span class="at">y =</span> <span class="st">&quot;Fitted mean total count&quot;</span>) <span class="sc">+</span></span>
 <span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2821,7 +2763,172 @@ H4: also add a spatial effect to magnitude
 </div>
 </div>
 </div>
-<p>The horizontal bands in H1–H3 arise because equal-area portions have the same fitted count under H1, or the same count within a stratum under H2–H3. Clipped portions have smaller areas and correspondingly lower fitted counts; their agreement with the 1:1 line partly reflects this area adjustment. H4–H5 also allow magnitude to vary spatially, so their fitted counts follow the observed variation more closely. H2 and H3 share the same magnitude model, as do H4 and H5; their differences in composition do not change the total-count model. These are fitted values at sampled locations, so proximity to the line does not establish prediction accuracy elsewhere.</p>
+<p>The horizontal bands in H1–H3 arise because equal-area portions have the same fitted count under H1, or the same count within a stratum under H2–H3. Smaller portions have correspondingly lower fitted counts. H4–H5 also allow magnitude to vary spatially, so their fitted counts follow the observed variation more closely. We next assess prediction at plots excluded from fitting.</p>
+</section>
+<section id="predict-held-out-plots" class="level3">
+<h3 class="anchored" data-anchor-id="predict-held-out-plots">Predict held-out plots</h3>
+<p>We assess prediction using leave-one-plot-out cross-validation of this first inventory. Each model is fitted to 47 plots and predicts the omitted plot, repeating this for all 48 plots. If a plot crosses a stratum boundary, all its portions are withheld together. The observed counts at that plot are used only to assess its predictions.</p>
+<p><code>magCompCV()</code> handles the refitting and prediction. We assign portions to folds using their original <code>plot_id</code>, and use the same model formulas and MCMC settings as above. The following call illustrates H5; <code>cross_validate_ladder.R</code> runs the comparison for any of H1–H5.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(<span class="st">&quot;ladder_functions.R&quot;</span>)</span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>formulas <span class="ot">&lt;-</span> <span class="fu">ladder_formulas</span>(<span class="st">&quot;H5&quot;</span>)</span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a>portions <span class="ot">&lt;-</span> trees <span class="sc">|&gt;</span> <span class="fu">distinct</span>(unit_id, plot_id, area_ha)</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>fold_id <span class="ot">&lt;-</span> <span class="fu">setNames</span>(portions<span class="sc">$</span>plot_id, portions<span class="sc">$</span>unit_id)</span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>cv <span class="ot">&lt;-</span> <span class="fu">magCompCV</span>(</span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>  dat, <span class="at">magnitude =</span> formulas<span class="sc">$</span>magnitude, <span class="at">composition =</span> formulas<span class="sc">$</span>composition,</span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>  <span class="at">fold_id =</span> fold_id, <span class="at">target =</span> <span class="st">&quot;observation&quot;</span>, <span class="at">type =</span> <span class="st">&quot;count&quot;</span>, <span class="at">summary =</span> <span class="st">&quot;samples&quot;</span>,</span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>  <span class="at">control =</span> <span class="fu">magCompControl</span>(</span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_samples =</span> <span class="dv">50000</span>, <span class="at">n_burn =</span> <span class="dv">20000</span>, <span class="at">n_thin =</span> <span class="dv">10</span>,</span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>    <span class="at">n_chains =</span> <span class="dv">3</span>, <span class="at">n_cores =</span> <span class="dv">3</span>, <span class="at">chain_seeds =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>,</span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a>    <span class="at">nb_size =</span> <span class="dv">1000</span>, <span class="at">verbose =</span> <span class="cn">FALSE</span></span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</div>
+<p>For each held-out plot, we sum its portions’ predicted counts within each draw and divide by their combined sampled area. Cross-validation uses all 3,000 retained draws per chain. <code>summarize_ladder_cv.R</code> compares these predictions with the observed species-by-DBH densities. Mean error indicates overprediction or underprediction, root mean squared prediction error (RMSPE) summarizes error magnitude, and coverage and width describe the pointwise 95% predictive intervals. Each of the 48 × 30 plot cells receives equal weight, including zero counts.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a>cv_summary <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/cv/summary.csv&quot;</span>)</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>cv_summary <span class="sc">|&gt;</span></span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(model, mean_error, rmspe, coverage, mean_width) <span class="sc">|&gt;</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="dv">2</span>, <span class="dv">2</span>, <span class="dv">1</span>, <span class="dv">1</span>), <span class="at">col.names =</span> <span class="fu">c</span>(</span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;Model&quot;</span>, <span class="st">&quot;Mean error (trees/ha)&quot;</span>, <span class="st">&quot;RMSPE (trees/ha)&quot;</span>,</span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;Coverage (%)&quot;</span>, <span class="st">&quot;Mean width (trees/ha)&quot;</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>  ))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<colgroup>
+<col style="width: 7%">
+<col style="width: 27%">
+<col style="width: 21%">
+<col style="width: 16%">
+<col style="width: 27%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: left;">Model</th>
+<th style="text-align: right;">Mean error (trees/ha)</th>
+<th style="text-align: right;">RMSPE (trees/ha)</th>
+<th style="text-align: right;">Coverage (%)</th>
+<th style="text-align: right;">Mean width (trees/ha)</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: left;">H1</td>
+<td style="text-align: right;">-0.04</td>
+<td style="text-align: right;">42.61</td>
+<td style="text-align: right;">96.7</td>
+<td style="text-align: right;">77.6</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">H2</td>
+<td style="text-align: right;">0.04</td>
+<td style="text-align: right;">41.80</td>
+<td style="text-align: right;">96.7</td>
+<td style="text-align: right;">76.4</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">H3</td>
+<td style="text-align: right;">0.02</td>
+<td style="text-align: right;">41.30</td>
+<td style="text-align: right;">96.7</td>
+<td style="text-align: right;">78.1</td>
+</tr>
+<tr class="even">
+<td style="text-align: left;">H4</td>
+<td style="text-align: right;">0.09</td>
+<td style="text-align: right;">40.82</td>
+<td style="text-align: right;">97.0</td>
+<td style="text-align: right;">80.8</td>
+</tr>
+<tr class="odd">
+<td style="text-align: left;">H5</td>
+<td style="text-align: right;">0.12</td>
+<td style="text-align: right;">40.07</td>
+<td style="text-align: right;">97.5</td>
+<td style="text-align: right;">90.5</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>H5 has the lowest RMSPE, about 6% below H1, but also the widest intervals. All five models have small mean errors and observed-cell coverage of about 97%. The added stratum and spatial structure therefore gives a modest improvement in prediction of the observed cell densities.</p>
+<p>We also assess prediction within each stratum, scoring each held-out portion using its own counts and area. Each entry below gives RMSPE (trees/ha), with 95% predictive-interval coverage (%) in parentheses.</p>
+<div class="cell">
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>cv_strata <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/cv/stratum_summary.csv&quot;</span>)</span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>cv_strata <span class="sc">|&gt;</span></span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">score =</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.1f (%.1f)&quot;</span>, rmspe, coverage)) <span class="sc">|&gt;</span></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(stratum_id, portions, model, score) <span class="sc">|&gt;</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_wider</span>(<span class="at">names_from =</span> model, <span class="at">values_from =</span> score) <span class="sc">|&gt;</span></span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">&quot;Stratum&quot;</span>, <span class="st">&quot;Portions&quot;</span>, <span class="fu">paste0</span>(<span class="st">&quot;H&quot;</span>, <span class="dv">1</span><span class="sc">:</span><span class="dv">5</span>)))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="cell-output-display">
+<table class="caption-top table table-sm table-striped small">
+<colgroup>
+<col style="width: 10%">
+<col style="width: 11%">
+<col style="width: 16%">
+<col style="width: 15%">
+<col style="width: 15%">
+<col style="width: 15%">
+<col style="width: 15%">
+</colgroup>
+<thead>
+<tr class="header">
+<th style="text-align: right;">Stratum</th>
+<th style="text-align: right;">Portions</th>
+<th style="text-align: left;">H1</th>
+<th style="text-align: left;">H2</th>
+<th style="text-align: left;">H3</th>
+<th style="text-align: left;">H4</th>
+<th style="text-align: left;">H5</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: left;">39.0 (95.0)</td>
+<td style="text-align: left;">36.7 (95.0)</td>
+<td style="text-align: left;">37.2 (95.0)</td>
+<td style="text-align: left;">36.9 (96.7)</td>
+<td style="text-align: left;">38.9 (93.3)</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: left;">48.4 (96.9)</td>
+<td style="text-align: left;">48.0 (97.3)</td>
+<td style="text-align: left;">46.8 (97.1)</td>
+<td style="text-align: left;">46.4 (97.1)</td>
+<td style="text-align: left;">45.1 (97.7)</td>
+</tr>
+<tr class="odd">
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: left;">33.1 (100.0)</td>
+<td style="text-align: left;">20.5 (95.6)</td>
+<td style="text-align: left;">21.0 (95.6)</td>
+<td style="text-align: left;">21.1 (96.7)</td>
+<td style="text-align: left;">21.2 (96.7)</td>
+</tr>
+<tr class="even">
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">31</td>
+<td style="text-align: left;">40.5 (96.8)</td>
+<td style="text-align: left;">40.4 (96.7)</td>
+<td style="text-align: left;">40.1 (96.8)</td>
+<td style="text-align: left;">39.6 (97.2)</td>
+<td style="text-align: left;">39.2 (97.8)</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<p>H5 has the lowest RMSPE in strata 2 and 4, while H2 has the lowest in strata 1 and 3. In the wetland stratum, adding stratum effects accounts for most of the improvement. Strata 1 and 3 have only two and three sampled portions, respectively, so their CV scores describe very few locations. These comparisons concern withheld portions; the following sections assess estimates for the full forest and strata against the census.</p>
 </section>
 </section>
 <section id="predict-the-unsampled-forest" class="level2">
@@ -2830,52 +2937,44 @@ H4: also add a spatial effect to magnitude
 <p>The square spatial prediction cells have nominal area <span class="math inline">\pi 9^2</span> m², equal to a full sampling plot. They are clipped to the forest, split at stratum boundaries, and have sampled areas removed. This leaves 1,515 unsampled portions. Their areas and the sampled areas sum to the full stratum areas.</p>
 <p>We read these portions and generate joint predictions over the entire remainder. <code>target = &quot;observation&quot;</code> draws total counts and their species-by-DBH allocations, including uncertainty in model parameters and random effects. The spatial predictions also preserve dependence among prediction locations.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a>prediction <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/prediction.csv&quot;</span>)</span>
-<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>stratum_areas <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/stratum_areas.csv&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a>prediction <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/prediction.csv&quot;</span>)</span>
+<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>stratum_areas <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/stratum_areas.csv&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb15"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
-<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>h5_predictions <span class="ot">&lt;-</span> <span class="fu">predict</span>(</span>
-<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>  h5, prediction, <span class="at">target =</span> <span class="st">&quot;observation&quot;</span>, <span class="at">type =</span> <span class="st">&quot;density&quot;</span>,</span>
-<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">summary =</span> <span class="st">&quot;samples&quot;</span>, <span class="at">n_draws =</span> <span class="dv">333</span></span>
-<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a><span class="fu">set.seed</span>(<span class="dv">1</span>)</span>
+<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>h5_predictions <span class="ot">&lt;-</span> <span class="fu">predict</span>(</span>
+<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a>  h5, prediction, <span class="at">target =</span> <span class="st">&quot;observation&quot;</span>, <span class="at">type =</span> <span class="st">&quot;density&quot;</span>,</span>
+<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>  <span class="at">summary =</span> <span class="st">&quot;samples&quot;</span>, <span class="at">n_draws =</span> <span class="dv">333</span></span>
+<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <section id="add-the-observed-counts" class="level3">
 <h3 class="anchored" data-anchor-id="add-the-observed-counts">Add the observed counts</h3>
-<p>For stratum <span class="math inline">h</span>, species <span class="math inline">a</span>, and DBH class <span class="math inline">b</span>, a population-total draw is</p>
-<p><span class="math display">
-T^{(\ell)}_{hab}
-= T^{\mathrm{observed}}_{hab}
-+ \widetilde T^{(\ell),\mathrm{unsampled}}_{hab},
-\qquad D^{(\ell)}_{hab}=T^{(\ell)}_{hab}/A_h,
-</span></p>
-<p>where <span class="math inline">\ell</span> indexes retained posterior draws and <span class="math inline">A_h</span> is the full stratum area. The observed contribution stays fixed across draws. Summing stratum totals and dividing by the forest area gives forest density.</p>
-<p><code>standSummary(type = &quot;total&quot;)</code> multiplies predicted densities by their represented areas and sums within strata. Here those areas are also the count exposures, so the result is a draw of the unsampled count. We add the observed counts to it using matching stratum and category labels.</p>
+<p>For each species-by-DBH cell, we add its observed count to every draw of its predicted unsampled count. <code>standSummary(type = &quot;total&quot;)</code> multiplies predicted densities by their represented areas and sums within strata. We then add the observed counts using matching stratum and category labels.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a>unsampled <span class="ot">&lt;-</span> <span class="fu">standSummary</span>(</span>
-<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>  h5_predictions, <span class="at">data =</span> prediction, <span class="at">unit =</span> unit_id, <span class="at">group =</span> stratum_id,</span>
-<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">represented_area =</span> area_ha, <span class="at">type =</span> <span class="st">&quot;total&quot;</span>, <span class="at">summary =</span> <span class="st">&quot;samples&quot;</span></span>
-<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a>)</span>
-<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>observed <span class="ot">&lt;-</span> trees <span class="sc">|&gt;</span></span>
-<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">stratum =</span> <span class="fu">factor</span>(stratum_id, <span class="at">levels =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>),</span>
-<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a>         <span class="at">category =</span> <span class="fu">paste</span>(species, dbh_class, <span class="at">sep =</span> <span class="st">&quot;:&quot;</span>))</span>
-<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>observed_counts <span class="ot">&lt;-</span> <span class="fu">xtabs</span>(count <span class="sc">~</span> stratum <span class="sc">+</span> category, <span class="at">data =</span> observed)</span>
-<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a>stratum_ids <span class="ot">&lt;-</span> <span class="fu">dimnames</span>(unsampled<span class="sc">$</span>total)[[<span class="dv">1</span>]]</span>
-<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>categories <span class="ot">&lt;-</span> <span class="fu">dimnames</span>(unsampled<span class="sc">$</span>total)[[<span class="dv">2</span>]]</span>
-<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>known_counts <span class="ot">&lt;-</span> observed_counts[stratum_ids, categories]</span>
-<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Dimensions are stratum x category x draw x chain.</span></span>
-<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a>h5_totals <span class="ot">&lt;-</span> <span class="fu">sweep</span>(unsampled<span class="sc">$</span>total, <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>), known_counts, <span class="st">&quot;+&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>unsampled <span class="ot">&lt;-</span> <span class="fu">standSummary</span>(</span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>  h5_predictions, <span class="at">data =</span> prediction, <span class="at">unit =</span> unit_id, <span class="at">group =</span> stratum_id,</span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>  <span class="at">represented_area =</span> area_ha, <span class="at">type =</span> <span class="st">&quot;total&quot;</span>, <span class="at">summary =</span> <span class="st">&quot;samples&quot;</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>observed <span class="ot">&lt;-</span> trees <span class="sc">|&gt;</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">stratum =</span> <span class="fu">factor</span>(stratum_id, <span class="at">levels =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>),</span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>         <span class="at">category =</span> <span class="fu">paste</span>(species, dbh_class, <span class="at">sep =</span> <span class="st">&quot;:&quot;</span>))</span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>observed_counts <span class="ot">&lt;-</span> <span class="fu">xtabs</span>(count <span class="sc">~</span> stratum <span class="sc">+</span> category, <span class="at">data =</span> observed)</span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a>stratum_ids <span class="ot">&lt;-</span> <span class="fu">dimnames</span>(unsampled<span class="sc">$</span>total)[[<span class="dv">1</span>]]</span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a>categories <span class="ot">&lt;-</span> <span class="fu">dimnames</span>(unsampled<span class="sc">$</span>total)[[<span class="dv">2</span>]]</span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a>known_counts <span class="ot">&lt;-</span> observed_counts[stratum_ids, categories]</span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Dimensions are stratum x category x draw x chain.</span></span>
+<span id="cb19-16"><a href="#cb19-16" aria-hidden="true" tabindex="-1"></a>h5_totals <span class="ot">&lt;-</span> <span class="fu">sweep</span>(unsampled<span class="sc">$</span>total, <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>), known_counts, <span class="st">&quot;+&quot;</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <p>For example, one draw for hemlock in the smallest DBH class in stratum 2 has the following contributions.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb17"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb17-1"><a href="#cb17-1" aria-hidden="true" tabindex="-1"></a><span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/one_draw.csv&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb17-2"><a href="#cb17-2" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>, <span class="at">col.names =</span> <span class="fu">c</span>(</span>
-<span id="cb17-3"><a href="#cb17-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;Observed count&quot;</span>, <span class="st">&quot;Predicted unsampled count&quot;</span>, <span class="st">&quot;Population count&quot;</span>, <span class="st">&quot;Density (trees/ha)&quot;</span></span>
-<span id="cb17-4"><a href="#cb17-4" aria-hidden="true" tabindex="-1"></a>  ))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/one_draw.csv&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">digits =</span> <span class="dv">2</span>, <span class="at">col.names =</span> <span class="fu">c</span>(</span>
+<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a>    <span class="st">&quot;Observed count&quot;</span>, <span class="st">&quot;Predicted unsampled count&quot;</span>, <span class="st">&quot;Population count&quot;</span>, <span class="st">&quot;Density (trees/ha)&quot;</span></span>
+<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  ))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output-display">
 <table class="caption-top table table-sm table-striped small">
 <colgroup>
@@ -2908,48 +3007,51 @@ T^{(\ell)}_{hab}
 <h3 class="anchored" data-anchor-id="summarize-after-aggregation">Summarize after aggregation</h3>
 <p>We divide population counts by the full stratum areas. Forest summaries sum stratum counts within each draw before division and interval calculation; adding interval endpoints would not give a forest interval.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb18"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb18-1"><a href="#cb18-1" aria-hidden="true" tabindex="-1"></a>areas <span class="ot">&lt;-</span> <span class="fu">setNames</span>(stratum_areas<span class="sc">$</span>area_ha, stratum_areas<span class="sc">$</span>stratum_id)</span>
-<span id="cb18-2"><a href="#cb18-2" aria-hidden="true" tabindex="-1"></a>stratum_density <span class="ot">&lt;-</span> <span class="fu">sweep</span>(h5_totals, <span class="dv">1</span>, areas[stratum_ids], <span class="st">&quot;/&quot;</span>)</span>
-<span id="cb18-3"><a href="#cb18-3" aria-hidden="true" tabindex="-1"></a>forest_density <span class="ot">&lt;-</span> <span class="fu">apply</span>(h5_totals, <span class="fu">c</span>(<span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">4</span>), sum) <span class="sc">/</span> <span class="fu">sum</span>(areas)</span>
-<span id="cb18-4"><a href="#cb18-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb18-5"><a href="#cb18-5" aria-hidden="true" tabindex="-1"></a>forest_summary <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
-<span id="cb18-6"><a href="#cb18-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">category =</span> <span class="fu">dimnames</span>(forest_density)[[<span class="dv">1</span>]],</span>
-<span id="cb18-7"><a href="#cb18-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">mean =</span> <span class="fu">apply</span>(forest_density, <span class="dv">1</span>, mean),</span>
-<span id="cb18-8"><a href="#cb18-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">lower =</span> <span class="fu">apply</span>(forest_density, <span class="dv">1</span>, quantile, <span class="fl">0.025</span>),</span>
-<span id="cb18-9"><a href="#cb18-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">upper =</span> <span class="fu">apply</span>(forest_density, <span class="dv">1</span>, quantile, <span class="fl">0.975</span>)</span>
-<span id="cb18-10"><a href="#cb18-10" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>areas <span class="ot">&lt;-</span> <span class="fu">setNames</span>(stratum_areas<span class="sc">$</span>area_ha, stratum_areas<span class="sc">$</span>stratum_id)</span>
+<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a>stratum_density <span class="ot">&lt;-</span> <span class="fu">sweep</span>(h5_totals, <span class="dv">1</span>, areas[stratum_ids], <span class="st">&quot;/&quot;</span>)</span>
+<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a>forest_density <span class="ot">&lt;-</span> <span class="fu">apply</span>(h5_totals, <span class="fu">c</span>(<span class="dv">2</span>, <span class="dv">3</span>, <span class="dv">4</span>), sum) <span class="sc">/</span> <span class="fu">sum</span>(areas)</span>
+<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>forest_summary <span class="ot">&lt;-</span> <span class="fu">tibble</span>(</span>
+<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a>  <span class="at">category =</span> <span class="fu">dimnames</span>(forest_density)[[<span class="dv">1</span>]],</span>
+<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>  <span class="at">mean =</span> <span class="fu">apply</span>(forest_density, <span class="dv">1</span>, mean),</span>
+<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>  <span class="at">lower =</span> <span class="fu">apply</span>(forest_density, <span class="dv">1</span>, quantile, <span class="fl">0.025</span>),</span>
+<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>  <span class="at">upper =</span> <span class="fu">apply</span>(forest_density, <span class="dv">1</span>, quantile, <span class="fl">0.975</span>)</span>
+<span id="cb21-10"><a href="#cb21-10" aria-hidden="true" tabindex="-1"></a>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
-<p>The download’s <code>population_summaries.R</code> applies these calculations to every model. The intervals summarize the posterior predictive distributions of census densities, conditional on the sampled trees and model assumptions.</p>
+<p>The intervals summarize the posterior predictive distributions of census densities, conditional on the sampled trees and model assumptions.</p>
 </section>
 </section>
 <section id="compare-estimates-with-the-census" class="level2">
 <h2 class="anchored" data-anchor-id="compare-estimates-with-the-census">Compare estimates with the census</h2>
 <p>We now use the full census to assess the estimates. Black horizontal marks show true densities; colored points and bars show posterior means and 95% intervals. Models are offset within each DBH class to keep their intervals visible.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb19"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a>comparison <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/comparison.csv&quot;</span>)</span>
-<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a>cell_comparison <span class="ot">&lt;-</span> comparison <span class="sc">|&gt;</span></span>
-<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Species-by-DBH&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">separate_wider_delim</span>(category, <span class="st">&quot;:&quot;</span>, <span class="at">names =</span> <span class="fu">c</span>(<span class="st">&quot;species&quot;</span>, <span class="st">&quot;dbh_class&quot;</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">species =</span> <span class="fu">factor</span>(species, <span class="at">levels =</span> species_order),</span>
-<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a>         <span class="at">dbh_class =</span> <span class="fu">ordered</span>(dbh_class, <span class="at">levels =</span> dbh_classes))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>comparison <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/ladder/comparison.csv&quot;</span>)</span>
+<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a>cell_comparison <span class="ot">&lt;-</span> comparison <span class="sc">|&gt;</span></span>
+<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Species-by-DBH&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">separate_wider_delim</span>(category, <span class="st">&quot;:&quot;</span>, <span class="at">names =</span> <span class="fu">c</span>(<span class="st">&quot;species&quot;</span>, <span class="st">&quot;dbh_class&quot;</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">species =</span> <span class="fu">factor</span>(species, <span class="at">levels =</span> species_order),</span>
+<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>         <span class="at">dbh_class =</span> <span class="fu">ordered</span>(dbh_class, <span class="at">levels =</span> dbh_classes))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 </div>
 <section id="forest-stand-table" class="level3">
 <h3 class="anchored" data-anchor-id="forest-stand-table">Forest stand table</h3>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a>forest_comparison <span class="ot">&lt;-</span> cell_comparison <span class="sc">|&gt;</span> <span class="fu">filter</span>(domain <span class="sc">==</span> <span class="st">&quot;Forest&quot;</span>)</span>
-<span id="cb20-2"><a href="#cb20-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb20-3"><a href="#cb20-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(forest_comparison, <span class="fu">aes</span>(dbh_class, mean, <span class="at">color =</span> model)) <span class="sc">+</span></span>
-<span id="cb20-4"><a href="#cb20-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> lower, <span class="at">ymax =</span> upper), <span class="at">width =</span> <span class="dv">0</span>,</span>
-<span id="cb20-5"><a href="#cb20-5" aria-hidden="true" tabindex="-1"></a>                <span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">alpha =</span> <span class="fl">0.65</span>) <span class="sc">+</span></span>
-<span id="cb20-6"><a href="#cb20-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">size =</span> <span class="fl">1.4</span>) <span class="sc">+</span></span>
-<span id="cb20-7"><a href="#cb20-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">data =</span> forest_comparison <span class="sc">|&gt;</span> <span class="fu">distinct</span>(species, dbh_class, truth),</span>
-<span id="cb20-8"><a href="#cb20-8" aria-hidden="true" tabindex="-1"></a>             <span class="fu">aes</span>(dbh_class, truth), <span class="at">inherit.aes =</span> <span class="cn">FALSE</span>, <span class="at">shape =</span> <span class="dv">95</span>, <span class="at">size =</span> <span class="dv">6</span>) <span class="sc">+</span></span>
-<span id="cb20-9"><a href="#cb20-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> species, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb20-10"><a href="#cb20-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors) <span class="sc">+</span></span>
-<span id="cb20-11"><a href="#cb20-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">limits =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="cn">NA</span>), <span class="at">expand =</span> <span class="fu">expansion</span>(<span class="at">mult =</span> <span class="fu">c</span>(.<span class="dv">01</span>, .<span class="dv">08</span>))) <span class="sc">+</span></span>
-<span id="cb20-12"><a href="#cb20-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;DBH class (cm)&quot;</span>, <span class="at">y =</span> <span class="st">&quot;Density (trees/ha)&quot;</span>, <span class="at">color =</span> <span class="st">&quot;Model&quot;</span>) <span class="sc">+</span></span>
-<span id="cb20-13"><a href="#cb20-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
-<span id="cb20-14"><a href="#cb20-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">&quot;bottom&quot;</span>, <span class="at">axis.text.x =</span> <span class="fu">element_text</span>(<span class="at">angle =</span> <span class="dv">45</span>, <span class="at">hjust =</span> <span class="dv">1</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<details class="code-fold">
+<summary>Show plotting code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb23"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a>forest_comparison <span class="ot">&lt;-</span> cell_comparison <span class="sc">|&gt;</span> <span class="fu">filter</span>(domain <span class="sc">==</span> <span class="st">&quot;Forest&quot;</span>)</span>
+<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(forest_comparison, <span class="fu">aes</span>(dbh_class, mean, <span class="at">color =</span> model)) <span class="sc">+</span></span>
+<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> lower, <span class="at">ymax =</span> upper), <span class="at">width =</span> <span class="dv">0</span>,</span>
+<span id="cb23-5"><a href="#cb23-5" aria-hidden="true" tabindex="-1"></a>                <span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">alpha =</span> <span class="fl">0.65</span>) <span class="sc">+</span></span>
+<span id="cb23-6"><a href="#cb23-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">size =</span> <span class="fl">1.4</span>) <span class="sc">+</span></span>
+<span id="cb23-7"><a href="#cb23-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">data =</span> forest_comparison <span class="sc">|&gt;</span> <span class="fu">distinct</span>(species, dbh_class, truth),</span>
+<span id="cb23-8"><a href="#cb23-8" aria-hidden="true" tabindex="-1"></a>             <span class="fu">aes</span>(dbh_class, truth), <span class="at">inherit.aes =</span> <span class="cn">FALSE</span>, <span class="at">shape =</span> <span class="dv">95</span>, <span class="at">size =</span> <span class="dv">6</span>) <span class="sc">+</span></span>
+<span id="cb23-9"><a href="#cb23-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> species, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb23-10"><a href="#cb23-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors) <span class="sc">+</span></span>
+<span id="cb23-11"><a href="#cb23-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">limits =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="cn">NA</span>), <span class="at">expand =</span> <span class="fu">expansion</span>(<span class="at">mult =</span> <span class="fu">c</span>(.<span class="dv">01</span>, .<span class="dv">08</span>))) <span class="sc">+</span></span>
+<span id="cb23-12"><a href="#cb23-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;DBH class (cm)&quot;</span>, <span class="at">y =</span> <span class="st">&quot;Density (trees/ha)&quot;</span>, <span class="at">color =</span> <span class="st">&quot;Model&quot;</span>) <span class="sc">+</span></span>
+<span id="cb23-13"><a href="#cb23-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>() <span class="sc">+</span></span>
+<span id="cb23-14"><a href="#cb23-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">&quot;bottom&quot;</span>, <span class="at">axis.text.x =</span> <span class="fu">element_text</span>(<span class="at">angle =</span> <span class="dv">45</span>, <span class="at">hjust =</span> <span class="dv">1</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2965,20 +3067,23 @@ T^{(\ell)}_{hab}
 <h3 class="anchored" data-anchor-id="stratum-stand-tables">Stratum stand tables</h3>
 <p>Stratum comparisons show differences that are less apparent after averaging over the whole forest.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb21"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb21-1"><a href="#cb21-1" aria-hidden="true" tabindex="-1"></a>stand_comparison <span class="ot">&lt;-</span> cell_comparison <span class="sc">|&gt;</span> <span class="fu">filter</span>(domain <span class="sc">!=</span> <span class="st">&quot;Forest&quot;</span>)</span>
-<span id="cb21-2"><a href="#cb21-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb21-3"><a href="#cb21-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(stand_comparison, <span class="fu">aes</span>(dbh_class, mean, <span class="at">color =</span> model)) <span class="sc">+</span></span>
-<span id="cb21-4"><a href="#cb21-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> lower, <span class="at">ymax =</span> upper), <span class="at">width =</span> <span class="dv">0</span>,</span>
-<span id="cb21-5"><a href="#cb21-5" aria-hidden="true" tabindex="-1"></a>                <span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">alpha =</span> <span class="fl">0.6</span>) <span class="sc">+</span></span>
-<span id="cb21-6"><a href="#cb21-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">size =</span> <span class="fl">0.9</span>) <span class="sc">+</span></span>
-<span id="cb21-7"><a href="#cb21-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">data =</span> stand_comparison <span class="sc">|&gt;</span> <span class="fu">distinct</span>(domain, species, dbh_class, truth),</span>
-<span id="cb21-8"><a href="#cb21-8" aria-hidden="true" tabindex="-1"></a>             <span class="fu">aes</span>(dbh_class, truth), <span class="at">inherit.aes =</span> <span class="cn">FALSE</span>, <span class="at">shape =</span> <span class="dv">95</span>, <span class="at">size =</span> <span class="dv">4</span>) <span class="sc">+</span></span>
-<span id="cb21-9"><a href="#cb21-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> domain <span class="sc">+</span> species, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">5</span>) <span class="sc">+</span></span>
-<span id="cb21-10"><a href="#cb21-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors) <span class="sc">+</span></span>
-<span id="cb21-11"><a href="#cb21-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">limits =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="cn">NA</span>), <span class="at">expand =</span> <span class="fu">expansion</span>(<span class="at">mult =</span> <span class="fu">c</span>(.<span class="dv">01</span>, .<span class="dv">08</span>))) <span class="sc">+</span></span>
-<span id="cb21-12"><a href="#cb21-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;DBH class (cm)&quot;</span>, <span class="at">y =</span> <span class="st">&quot;Density (trees/ha)&quot;</span>, <span class="at">color =</span> <span class="st">&quot;Model&quot;</span>) <span class="sc">+</span></span>
-<span id="cb21-13"><a href="#cb21-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">10</span>) <span class="sc">+</span></span>
-<span id="cb21-14"><a href="#cb21-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">&quot;bottom&quot;</span>, <span class="at">axis.text.x =</span> <span class="fu">element_text</span>(<span class="at">angle =</span> <span class="dv">60</span>, <span class="at">hjust =</span> <span class="dv">1</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<details class="code-fold">
+<summary>Show plotting code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>stand_comparison <span class="ot">&lt;-</span> cell_comparison <span class="sc">|&gt;</span> <span class="fu">filter</span>(domain <span class="sc">!=</span> <span class="st">&quot;Forest&quot;</span>)</span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(stand_comparison, <span class="fu">aes</span>(dbh_class, mean, <span class="at">color =</span> model)) <span class="sc">+</span></span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> lower, <span class="at">ymax =</span> upper), <span class="at">width =</span> <span class="dv">0</span>,</span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a>                <span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">alpha =</span> <span class="fl">0.6</span>) <span class="sc">+</span></span>
+<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">position =</span> <span class="fu">position_dodge</span>(<span class="at">width =</span> <span class="fl">0.7</span>), <span class="at">size =</span> <span class="fl">0.9</span>) <span class="sc">+</span></span>
+<span id="cb24-7"><a href="#cb24-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">data =</span> stand_comparison <span class="sc">|&gt;</span> <span class="fu">distinct</span>(domain, species, dbh_class, truth),</span>
+<span id="cb24-8"><a href="#cb24-8" aria-hidden="true" tabindex="-1"></a>             <span class="fu">aes</span>(dbh_class, truth), <span class="at">inherit.aes =</span> <span class="cn">FALSE</span>, <span class="at">shape =</span> <span class="dv">95</span>, <span class="at">size =</span> <span class="dv">4</span>) <span class="sc">+</span></span>
+<span id="cb24-9"><a href="#cb24-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> domain <span class="sc">+</span> species, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">5</span>) <span class="sc">+</span></span>
+<span id="cb24-10"><a href="#cb24-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors) <span class="sc">+</span></span>
+<span id="cb24-11"><a href="#cb24-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_y_continuous</span>(<span class="at">limits =</span> <span class="fu">c</span>(<span class="dv">0</span>, <span class="cn">NA</span>), <span class="at">expand =</span> <span class="fu">expansion</span>(<span class="at">mult =</span> <span class="fu">c</span>(.<span class="dv">01</span>, .<span class="dv">08</span>))) <span class="sc">+</span></span>
+<span id="cb24-12"><a href="#cb24-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;DBH class (cm)&quot;</span>, <span class="at">y =</span> <span class="st">&quot;Density (trees/ha)&quot;</span>, <span class="at">color =</span> <span class="st">&quot;Model&quot;</span>) <span class="sc">+</span></span>
+<span id="cb24-13"><a href="#cb24-13" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">10</span>) <span class="sc">+</span></span>
+<span id="cb24-14"><a href="#cb24-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme</span>(<span class="at">legend.position =</span> <span class="st">&quot;bottom&quot;</span>, <span class="at">axis.text.x =</span> <span class="fu">element_text</span>(<span class="at">angle =</span> <span class="dv">60</span>, <span class="at">hjust =</span> <span class="dv">1</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -2989,20 +3094,23 @@ T^{(\ell)}_{hab}
 </div>
 </div>
 <p>The wetland stratum has only nine sampled stems, all red maple or white pine, although other species occur in its census. A stratum factor can share information across strata, but cannot determine the missing species and size composition precisely. Wider intervals can be appropriate when this uncertainty is represented.</p>
-<p>The common-intercept model cannot represent the wetland’s much lower expected stem density. H1 estimates about 590 trees/ha there, compared with census density of 174 trees/ha; H2 estimates about 181 trees/ha after adding stratum effects. H3 also allows within-species DBH allocation to vary by stratum. The spatial terms in H4 and H5 allow further local variation, but do not improve every cell equally.</p>
+<p>The common-intercept model cannot represent the wetland’s much lower expected stem density. H1 estimates about 590 trees/ha there, compared with census density of 174 trees/ha; H2 estimates about 181 trees/ha after adding stratum effects.</p>
 <p>We also compare overall density, summing all species and DBH classes within each draw. This is a different, less detailed target than any individual stand-table cell.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb22"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb22-1"><a href="#cb22-1" aria-hidden="true" tabindex="-1"></a>overall <span class="ot">&lt;-</span> comparison <span class="sc">|&gt;</span> <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Overall density&quot;</span>)</span>
-<span id="cb22-2"><a href="#cb22-2" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb22-3"><a href="#cb22-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(overall, <span class="fu">aes</span>(model, mean, <span class="at">color =</span> model)) <span class="sc">+</span></span>
-<span id="cb22-4"><a href="#cb22-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_hline</span>(<span class="at">data =</span> overall <span class="sc">|&gt;</span> <span class="fu">distinct</span>(domain, truth),</span>
-<span id="cb22-5"><a href="#cb22-5" aria-hidden="true" tabindex="-1"></a>              <span class="fu">aes</span>(<span class="at">yintercept =</span> truth), <span class="at">linetype =</span> <span class="st">&quot;dashed&quot;</span>) <span class="sc">+</span></span>
-<span id="cb22-6"><a href="#cb22-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> lower, <span class="at">ymax =</span> upper), <span class="at">width =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
-<span id="cb22-7"><a href="#cb22-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="fl">1.8</span>) <span class="sc">+</span></span>
-<span id="cb22-8"><a href="#cb22-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> domain, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb22-9"><a href="#cb22-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors, <span class="at">guide =</span> <span class="st">&quot;none&quot;</span>) <span class="sc">+</span></span>
-<span id="cb22-10"><a href="#cb22-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;Model&quot;</span>, <span class="at">y =</span> <span class="st">&quot;Overall density (trees/ha)&quot;</span>) <span class="sc">+</span></span>
-<span id="cb22-11"><a href="#cb22-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<details class="code-fold">
+<summary>Show plotting code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>overall <span class="ot">&lt;-</span> comparison <span class="sc">|&gt;</span> <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Overall density&quot;</span>)</span>
+<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(overall, <span class="fu">aes</span>(model, mean, <span class="at">color =</span> model)) <span class="sc">+</span></span>
+<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_hline</span>(<span class="at">data =</span> overall <span class="sc">|&gt;</span> <span class="fu">distinct</span>(domain, truth),</span>
+<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>              <span class="fu">aes</span>(<span class="at">yintercept =</span> truth), <span class="at">linetype =</span> <span class="st">&quot;dashed&quot;</span>) <span class="sc">+</span></span>
+<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> lower, <span class="at">ymax =</span> upper), <span class="at">width =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
+<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="fl">1.8</span>) <span class="sc">+</span></span>
+<span id="cb25-8"><a href="#cb25-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> domain, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb25-9"><a href="#cb25-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors, <span class="at">guide =</span> <span class="st">&quot;none&quot;</span>) <span class="sc">+</span></span>
+<span id="cb25-10"><a href="#cb25-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;Model&quot;</span>, <span class="at">y =</span> <span class="st">&quot;Overall density (trees/ha)&quot;</span>) <span class="sc">+</span></span>
+<span id="cb25-11"><a href="#cb25-11" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -3012,106 +3120,46 @@ T^{(\ell)}_{hab}
 </div>
 </div>
 </div>
-<p>This inventory illustrates estimation and uncertainty; it cannot establish repeated-sampling bias or coverage. It also does not imply that the most complex model will be best for every stand-table cell.</p>
+<p>We next repeat the sampling to assess how these estimates and intervals behave as the inventory changes.</p>
 </section>
 </section>
 <section id="repeated-sampling-of-the-same-forest" class="level2">
 <h2 class="anchored" data-anchor-id="repeated-sampling-of-the-same-forest">Repeated sampling of the same forest</h2>
 <p>We hold the census, boundaries, DBH classes, and nominal prediction-cell areas fixed and change the random shift of the sampling grid. Each layout gives a new inventory to which all five models are fitted. Sampled areas are removed from the prediction cells separately for each inventory.</p>
 <p>Each fit provides Bayesian inference conditional on its sample and model. The experiment evaluates these estimates and intervals as the sample changes, following the distinction between Bayesian inference and repeated-sampling assessment discussed by <span class="citation" data-cites="little2012calibrated">Little (<a href="#ref-little2012calibrated" role="doc-biblioref">2012</a>)</span>. A 95% posterior interval need not have 95% repeated-sampling coverage for every fixed forest, especially when the model misses features of that population. We do not simulate new forests from the fitted model.</p>
-<p>The results below summarize 1,000 random sampling layouts, including the first inventory illustrated above.</p>
-<section id="reproduce-the-experiment" class="level3">
-<h3 class="anchored" data-anchor-id="reproduce-the-experiment">Reproduce the experiment</h3>
-<p>The code runs independently of the article. These commands reproduce the 1,000 layouts with four simultaneous layouts and three parallel chains per fit, then produce the summary tables.</p>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb23"><pre class="sourceCode bash code-with-copy"><code class="sourceCode bash"><span id="cb23-1"><a href="#cb23-1" aria-hidden="true" tabindex="-1"></a><span class="bu">export</span> <span class="va">OPENBLAS_NUM_THREADS</span><span class="op">=</span>1 <span class="va">OMP_NUM_THREADS</span><span class="op">=</span>1 <span class="va">MKL_NUM_THREADS</span><span class="op">=</span>1</span>
-<span id="cb23-2"><a href="#cb23-2" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> repeat_ladder.R 1 1000 4 3</span>
-<span id="cb23-3"><a href="#cb23-3" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> summarize_ladder_repetitions.R 1 1000</span>
-<span id="cb23-4"><a href="#cb23-4" aria-hidden="true" tabindex="-1"></a><span class="ex">Rscript</span> export_ladder_example.R</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-</div>
-<p>Use a smaller last-layout number to try a shorter experiment. <code>sample_functions.R</code> handles the sampling geometry, <code>ladder_functions.R</code> contains the five model formulas, and <code>population_summaries.R</code> predicts and aggregates counts. <code>ladder_settings.R</code> specifies the chain lengths. Every fit uses chain seeds <code>1:3</code>; grid placement and prediction use the layout number as their seed. Every model uses the same sample for a given layout.</p>
-<p>All 5,000 fits used the same three-chain, 50,000-iteration settings as the first inventory. Sixteen fits exceeded an R-hat screening value of 1.05, mainly for stratum variances and combined species effects. All 1,000 layouts are included in the assessment; the diagnostic summaries are supplied with the results.</p>
-<div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb24"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a>sampling_summary <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/repeated_ladder/sampling_summary.csv&quot;</span>)</span>
-<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a>repeated_summary <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/repeated_ladder/domain_summary.csv&quot;</span>)</span>
-<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a>sampling_summary <span class="sc">|&gt;</span></span>
-<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(stratum_id, min_portions, median_portions, max_portions, unsampled) <span class="sc">|&gt;</span></span>
-<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>(<span class="at">col.names =</span> <span class="fu">c</span>(<span class="st">&quot;Stratum&quot;</span>, <span class="st">&quot;Minimum portions&quot;</span>, <span class="st">&quot;Median&quot;</span>, <span class="st">&quot;Maximum&quot;</span>,</span>
-<span id="cb24-7"><a href="#cb24-7" aria-hidden="true" tabindex="-1"></a>                            <span class="st">&quot;Layouts with no portion&quot;</span>))</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
-<div class="cell-output-display">
-<table class="caption-top table table-sm table-striped small">
-<thead>
-<tr class="header">
-<th style="text-align: right;">Stratum</th>
-<th style="text-align: right;">Minimum portions</th>
-<th style="text-align: right;">Median</th>
-<th style="text-align: right;">Maximum</th>
-<th style="text-align: right;">Layouts with no portion</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td style="text-align: right;">1</td>
-<td style="text-align: right;">1</td>
-<td style="text-align: right;">2</td>
-<td style="text-align: right;">5</td>
-<td style="text-align: right;">0</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">2</td>
-<td style="text-align: right;">9</td>
-<td style="text-align: right;">13</td>
-<td style="text-align: right;">17</td>
-<td style="text-align: right;">0</td>
-</tr>
-<tr class="odd">
-<td style="text-align: right;">3</td>
-<td style="text-align: right;">2</td>
-<td style="text-align: right;">4</td>
-<td style="text-align: right;">5</td>
-<td style="text-align: right;">0</td>
-</tr>
-<tr class="even">
-<td style="text-align: right;">4</td>
-<td style="text-align: right;">25</td>
-<td style="text-align: right;">33</td>
-<td style="text-align: right;">37</td>
-<td style="text-align: right;">0</td>
-</tr>
-</tbody>
-</table>
-</div>
-</div>
-<p>Every stratum was sampled in these 1,000 layouts, although stratum 1 sometimes had only one sampled portion. If a layout misses a stratum, it remains a prediction target, with its random effects drawn from the fitted distributions for stratum effects.</p>
-</section>
+<p>The results below summarize 1,000 random sampling layouts, including the first inventory illustrated above. All five models use the same sample within each layout and the MCMC settings given above. The download’s README provides instructions for reproducing the experiment and details of the chain diagnostics.</p>
 <section id="stand-table-accuracy-and-interval-coverage" class="level3">
 <h3 class="anchored" data-anchor-id="stand-table-accuracy-and-interval-coverage">Stand-table accuracy and interval coverage</h3>
 <p>Here, <strong>repeated-sampling bias</strong> is estimated by averaging each inventory’s posterior mean estimate minus the fixed census value across plot layouts. Positive values indicate overestimation on average; negative values indicate underestimation. Design-unbiasedness would require the average error over all possible layouts under the sampling design to be zero. Our posterior means are not constructed to guarantee that property; we are measuring their performance for this forest and sampling design.</p>
 <p>Relative bias expresses the average error as a percentage of the true density. RMSE describes error magnitude, coverage is the percentage of intervals containing the fixed census value, and width summarizes interval length.</p>
-<p>The figure summarizes the 30 species-by-DBH cells within each reporting area, including cells with zero census counts. RMSE uses their squared errors; coverage and width average across cells. Bars show Monte Carlo standard errors calculated across inventories, keeping cells from the same inventory together. Lower RMSE is useful, but should be considered together with coverage and width.</p>
+<p>The figure summarizes the 30 species-by-DBH cells within each reporting area, including cells with zero census counts. RMSE uses their squared errors; coverage and width average across cells. Bars show Monte Carlo standard errors calculated across inventories.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb25"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb25-1"><a href="#cb25-1" aria-hidden="true" tabindex="-1"></a>metric_plot <span class="ot">&lt;-</span> repeated_summary <span class="sc">|&gt;</span></span>
-<span id="cb25-2"><a href="#cb25-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Species-by-DBH&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb25-3"><a href="#cb25-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(domain, model, rmse, coverage, mean_width, rmse_mcse, coverage_mcse, width_mcse) <span class="sc">|&gt;</span></span>
-<span id="cb25-4"><a href="#cb25-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="fu">c</span>(rmse, coverage, mean_width), <span class="at">names_to =</span> <span class="st">&quot;metric&quot;</span>, <span class="at">values_to =</span> <span class="st">&quot;value&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb25-5"><a href="#cb25-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">mcse =</span> <span class="fu">case_when</span>(metric <span class="sc">==</span> <span class="st">&quot;rmse&quot;</span> <span class="sc">~</span> rmse_mcse,</span>
-<span id="cb25-6"><a href="#cb25-6" aria-hidden="true" tabindex="-1"></a>                          metric <span class="sc">==</span> <span class="st">&quot;coverage&quot;</span> <span class="sc">~</span> coverage_mcse,</span>
-<span id="cb25-7"><a href="#cb25-7" aria-hidden="true" tabindex="-1"></a>                          metric <span class="sc">==</span> <span class="st">&quot;mean_width&quot;</span> <span class="sc">~</span> width_mcse),</span>
-<span id="cb25-8"><a href="#cb25-8" aria-hidden="true" tabindex="-1"></a>         <span class="at">metric =</span> <span class="fu">factor</span>(metric, <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">&quot;rmse&quot;</span>, <span class="st">&quot;coverage&quot;</span>, <span class="st">&quot;mean_width&quot;</span>),</span>
-<span id="cb25-9"><a href="#cb25-9" aria-hidden="true" tabindex="-1"></a>           <span class="at">labels =</span> <span class="fu">c</span>(<span class="st">&quot;RMSE (trees/ha)&quot;</span>, <span class="st">&quot;Coverage (%)&quot;</span>, <span class="st">&quot;Width (trees/ha)&quot;</span>)))</span>
-<span id="cb25-10"><a href="#cb25-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb25-11"><a href="#cb25-11" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(metric_plot, <span class="fu">aes</span>(model, value, <span class="at">color =</span> model)) <span class="sc">+</span></span>
-<span id="cb25-12"><a href="#cb25-12" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_hline</span>(<span class="at">data =</span> metric_plot <span class="sc">|&gt;</span> <span class="fu">filter</span>(metric <span class="sc">==</span> <span class="st">&quot;Coverage (%)&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb25-13"><a href="#cb25-13" aria-hidden="true" tabindex="-1"></a>               <span class="fu">distinct</span>(domain, metric) <span class="sc">|&gt;</span> <span class="fu">mutate</span>(<span class="at">reference =</span> <span class="dv">95</span>),</span>
-<span id="cb25-14"><a href="#cb25-14" aria-hidden="true" tabindex="-1"></a>             <span class="fu">aes</span>(<span class="at">yintercept =</span> reference),</span>
-<span id="cb25-15"><a href="#cb25-15" aria-hidden="true" tabindex="-1"></a>             <span class="at">linetype =</span> <span class="st">&quot;dashed&quot;</span>, <span class="at">color =</span> <span class="st">&quot;grey50&quot;</span>) <span class="sc">+</span></span>
-<span id="cb25-16"><a href="#cb25-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> value <span class="sc">-</span> mcse, <span class="at">ymax =</span> value <span class="sc">+</span> mcse), <span class="at">width =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
-<span id="cb25-17"><a href="#cb25-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="fl">1.5</span>) <span class="sc">+</span></span>
-<span id="cb25-18"><a href="#cb25-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> domain <span class="sc">+</span> metric, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
-<span id="cb25-19"><a href="#cb25-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors, <span class="at">guide =</span> <span class="st">&quot;none&quot;</span>) <span class="sc">+</span></span>
-<span id="cb25-20"><a href="#cb25-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;Model&quot;</span>, <span class="at">y =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
-<span id="cb25-21"><a href="#cb25-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">10</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<details class="code-fold">
+<summary>Show plotting code</summary>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>repeated_summary <span class="ot">&lt;-</span> <span class="fu">read_csv</span>(<span class="st">&quot;data/repeated_ladder/domain_summary.csv&quot;</span>)</span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>metric_plot <span class="ot">&lt;-</span> repeated_summary <span class="sc">|&gt;</span></span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Species-by-DBH&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(domain, model, rmse, coverage, mean_width, rmse_mcse, coverage_mcse, width_mcse) <span class="sc">|&gt;</span></span>
+<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">pivot_longer</span>(<span class="fu">c</span>(rmse, coverage, mean_width), <span class="at">names_to =</span> <span class="st">&quot;metric&quot;</span>, <span class="at">values_to =</span> <span class="st">&quot;value&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb26-7"><a href="#cb26-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">mcse =</span> <span class="fu">case_when</span>(metric <span class="sc">==</span> <span class="st">&quot;rmse&quot;</span> <span class="sc">~</span> rmse_mcse,</span>
+<span id="cb26-8"><a href="#cb26-8" aria-hidden="true" tabindex="-1"></a>                          metric <span class="sc">==</span> <span class="st">&quot;coverage&quot;</span> <span class="sc">~</span> coverage_mcse,</span>
+<span id="cb26-9"><a href="#cb26-9" aria-hidden="true" tabindex="-1"></a>                          metric <span class="sc">==</span> <span class="st">&quot;mean_width&quot;</span> <span class="sc">~</span> width_mcse),</span>
+<span id="cb26-10"><a href="#cb26-10" aria-hidden="true" tabindex="-1"></a>         <span class="at">metric =</span> <span class="fu">factor</span>(metric, <span class="at">levels =</span> <span class="fu">c</span>(<span class="st">&quot;rmse&quot;</span>, <span class="st">&quot;coverage&quot;</span>, <span class="st">&quot;mean_width&quot;</span>),</span>
+<span id="cb26-11"><a href="#cb26-11" aria-hidden="true" tabindex="-1"></a>           <span class="at">labels =</span> <span class="fu">c</span>(<span class="st">&quot;RMSE (trees/ha)&quot;</span>, <span class="st">&quot;Coverage (%)&quot;</span>, <span class="st">&quot;Width (trees/ha)&quot;</span>)))</span>
+<span id="cb26-12"><a href="#cb26-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb26-13"><a href="#cb26-13" aria-hidden="true" tabindex="-1"></a><span class="fu">ggplot</span>(metric_plot, <span class="fu">aes</span>(model, value, <span class="at">color =</span> model)) <span class="sc">+</span></span>
+<span id="cb26-14"><a href="#cb26-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_hline</span>(<span class="at">data =</span> metric_plot <span class="sc">|&gt;</span> <span class="fu">filter</span>(metric <span class="sc">==</span> <span class="st">&quot;Coverage (%)&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb26-15"><a href="#cb26-15" aria-hidden="true" tabindex="-1"></a>               <span class="fu">distinct</span>(domain, metric) <span class="sc">|&gt;</span> <span class="fu">mutate</span>(<span class="at">reference =</span> <span class="dv">95</span>),</span>
+<span id="cb26-16"><a href="#cb26-16" aria-hidden="true" tabindex="-1"></a>             <span class="fu">aes</span>(<span class="at">yintercept =</span> reference),</span>
+<span id="cb26-17"><a href="#cb26-17" aria-hidden="true" tabindex="-1"></a>             <span class="at">linetype =</span> <span class="st">&quot;dashed&quot;</span>, <span class="at">color =</span> <span class="st">&quot;grey50&quot;</span>) <span class="sc">+</span></span>
+<span id="cb26-18"><a href="#cb26-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_errorbar</span>(<span class="fu">aes</span>(<span class="at">ymin =</span> value <span class="sc">-</span> mcse, <span class="at">ymax =</span> value <span class="sc">+</span> mcse), <span class="at">width =</span> <span class="fl">0.15</span>) <span class="sc">+</span></span>
+<span id="cb26-19"><a href="#cb26-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_point</span>(<span class="at">size =</span> <span class="fl">1.5</span>) <span class="sc">+</span></span>
+<span id="cb26-20"><a href="#cb26-20" aria-hidden="true" tabindex="-1"></a>  <span class="fu">facet_wrap</span>(<span class="sc">~</span> domain <span class="sc">+</span> metric, <span class="at">scales =</span> <span class="st">&quot;free_y&quot;</span>, <span class="at">ncol =</span> <span class="dv">3</span>) <span class="sc">+</span></span>
+<span id="cb26-21"><a href="#cb26-21" aria-hidden="true" tabindex="-1"></a>  <span class="fu">scale_color_manual</span>(<span class="at">values =</span> model_colors, <span class="at">guide =</span> <span class="st">&quot;none&quot;</span>) <span class="sc">+</span></span>
+<span id="cb26-22"><a href="#cb26-22" aria-hidden="true" tabindex="-1"></a>  <span class="fu">labs</span>(<span class="at">x =</span> <span class="st">&quot;Model&quot;</span>, <span class="at">y =</span> <span class="cn">NULL</span>) <span class="sc">+</span></span>
+<span id="cb26-23"><a href="#cb26-23" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_minimal</span>(<span class="at">base_size =</span> <span class="dv">10</span>)</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+</details>
 <div class="cell-output-display">
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -3121,23 +3169,24 @@ T^{(\ell)}_{hab}
 </div>
 </div>
 </div>
-<p>Forest-level RMSE is similar across the five models. Differences are larger within strata: H1’s average cell coverage ranges from about 48% to 76%, whereas H5’s ranges from about 91% to 94%. Allowing stratum differences in species and DBH allocation improves coverage, with additional gains from the spatial terms. These rates average across the 30 stand-table cells; individual species and DBH classes can perform differently.</p>
-<p>Low coverage means that intervals exclude the true densities too often under this sampling design, giving an overly confident impression of the estimates. H5’s coverage is closer to the nominal 95%, supporting more dependable uncertainty reporting for these stratum stand tables. Some of that improvement comes from wider intervals. The more complex models do not uniformly reduce RMSE, so coverage, width, and estimation error should be considered together.</p>
+<p>Forest-level RMSE is similar across the five models. The benefits of allowing more local variation are clearer within strata. Adding stratum effects to magnitude and species allocation (H1 to H2) substantially reduces RMSE in strata 2–4 and improves coverage in all four strata.</p>
+<p>Allowing DBH allocation within species to vary by stratum (H2 to H3) further improves coverage, although RMSE improves in some strata and increases in others. Adding a spatial magnitude effect (H3 to H4) makes little further difference. Adding the species spatial factor (H4 to H5) reduces RMSE and improves coverage in every stratum. H5’s average cell coverage ranges from about 91% to 94%, compared with 48% to 76% for H1. The richer models therefore provide a clearer improvement in stratum-level uncertainty reporting than in forest-level point estimates.</p>
+<p>Stratum 1 illustrates why additional complexity is not always better for point estimation. H1 has lower RMSE than H5 there (12.7 versus 14.7 trees/ha), but its coverage is only about 74%, compared with 93% for H5. H5’s wider intervals better reflect estimation error across these layouts. Low coverage means that intervals exclude the census values too often, so RMSE alone would miss this difference. These rates average across the 30 stand-table cells; individual species and DBH classes can perform differently.</p>
 </section>
 <section id="overall-density" class="level3">
 <h3 class="anchored" data-anchor-id="overall-density">Overall density</h3>
 <p>Overall density is assessed after summing species and DBH counts within every predictive draw. For the forest as a whole, all five models have relative biases below 1% in magnitude. Values in parentheses below are Monte Carlo standard errors across the 1,000 layouts.</p>
 <div class="cell">
-<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb26"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a>repeated_summary <span class="sc">|&gt;</span></span>
-<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Overall density&quot;</span>, domain <span class="sc">==</span> <span class="st">&quot;Forest&quot;</span>) <span class="sc">|&gt;</span></span>
-<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">transmute</span>(</span>
-<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">Model =</span> model,</span>
-<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">Relative bias (%)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.2f (%.2f)&quot;</span>, relative_bias, relative_bias_mcse),</span>
-<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">RMSE (trees/ha)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.1f (%.1f)&quot;</span>, rmse, rmse_mcse),</span>
-<span id="cb26-7"><a href="#cb26-7" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">Coverage (%)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.1f (%.1f)&quot;</span>, coverage, coverage_mcse),</span>
-<span id="cb26-8"><a href="#cb26-8" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">Width (trees/ha)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.1f (%.1f)&quot;</span>, mean_width, width_mcse)</span>
-<span id="cb26-9"><a href="#cb26-9" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
-<span id="cb26-10"><a href="#cb26-10" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
+<div class="code-copy-outer-scaffold"><div class="sourceCode cell-code" id="cb27"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb27-1"><a href="#cb27-1" aria-hidden="true" tabindex="-1"></a>repeated_summary <span class="sc">|&gt;</span></span>
+<span id="cb27-2"><a href="#cb27-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(target <span class="sc">==</span> <span class="st">&quot;Overall density&quot;</span>, domain <span class="sc">==</span> <span class="st">&quot;Forest&quot;</span>) <span class="sc">|&gt;</span></span>
+<span id="cb27-3"><a href="#cb27-3" aria-hidden="true" tabindex="-1"></a>  <span class="fu">transmute</span>(</span>
+<span id="cb27-4"><a href="#cb27-4" aria-hidden="true" tabindex="-1"></a>    <span class="at">Model =</span> model,</span>
+<span id="cb27-5"><a href="#cb27-5" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">Relative bias (%)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.2f (%.2f)&quot;</span>, relative_bias, relative_bias_mcse),</span>
+<span id="cb27-6"><a href="#cb27-6" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">RMSE (trees/ha)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.1f (%.1f)&quot;</span>, rmse, rmse_mcse),</span>
+<span id="cb27-7"><a href="#cb27-7" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">Coverage (%)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.1f (%.1f)&quot;</span>, coverage, coverage_mcse),</span>
+<span id="cb27-8"><a href="#cb27-8" aria-hidden="true" tabindex="-1"></a>    <span class="st">`</span><span class="at">Width (trees/ha)</span><span class="st">`</span> <span class="ot">=</span> <span class="fu">sprintf</span>(<span class="st">&quot;%.1f (%.1f)&quot;</span>, mean_width, width_mcse)</span>
+<span id="cb27-9"><a href="#cb27-9" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">|&gt;</span></span>
+<span id="cb27-10"><a href="#cb27-10" aria-hidden="true" tabindex="-1"></a>  knitr<span class="sc">::</span><span class="fu">kable</span>()</span></code></pre></div><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></div>
 <div class="cell-output-display">
 <table class="caption-top table table-sm table-striped small">
 <colgroup>
@@ -3198,13 +3247,12 @@ T^{(\ell)}_{hab}
 </div>
 <p>Forest overall-density intervals are conservative under this sampling design, with coverage from 96.8% to 100%. H2 and H3 give narrower intervals than the other models with similar RMSE. This differs from the cell-level comparison above: summing categories changes both the target and its uncertainty.</p>
 <p>Stratum totals can behave differently. H1 substantially overestimates wetland density because it applies a common magnitude across the forest. Stratum effects greatly reduce that error, but wetland relative bias remains about 16% for H2 and H3 and 24% for H4 and H5. H5’s 95.1% coverage for overall wetland density accompanies wide intervals; it does not mean the point estimates are unbiased. Sparse observations and a model’s ability to describe the population both matter.</p>
-<p>The complete area summaries are in <code>data/repeated_ladder/domain_summary.csv</code>, and individual-cell results are in <code>target_summary.csv</code> in that directory. Small average bias can hide errors of opposite signs, and average coverage can hide poorly estimated species or size classes.</p>
 </section>
 </section>
 <section id="what-this-example-establishes" class="level2">
 <h2 class="anchored" data-anchor-id="what-this-example-establishes">What this example establishes</h2>
-<p>Stratum and spatial effects allow abundance and composition to vary across the forest while sharing information among sampled locations. Forest averages alone show little separation in point-estimate accuracy among the models; stratum stand tables reveal differences that matter for local estimates. H5 gives substantially better interval coverage than the common-intercept model, but additional complexity does not eliminate bias or uniformly improve point estimates.</p>
-<p>The workflow connects a partial inventory to forest and stratum summaries by combining observed counts with posterior predictions for unsampled areas. Aggregating within each draw preserves the uncertainty needed for those summaries. Repeated sampling then assesses estimation error, interval coverage, and width against the known census as the inventory changes. These checks should focus on the quantities managers need: good forest averages can coexist with poor estimates for particular strata or stand-table cells.</p>
+<p>Across repeated samples, similar forest-level RMSE conceals important differences within strata. Stratum effects account for much of the improvement in local point estimates, while the DBH stratum factor and species spatial factor improve interval coverage. H1 still gives lower RMSE in stratum 1. Additional complexity therefore needs to be assessed for the intended reporting areas, considering estimation error, interval coverage, and interval width together.</p>
+<p>Cross-validation checks prediction at omitted plots. The census comparisons assess forest and stratum estimates formed by combining observed counts with predictions for unsampled areas. Repeating the inventory shows how those estimates behave as the sample changes. These assessments complement one another: similar plot-level scores or forest averages can conceal differences that matter for local stand tables.</p>
 </section>
 <section id="references" class="level2 unnumbered">
 

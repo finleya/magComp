@@ -28,9 +28,16 @@ data_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)),
 knitr::opts_knit$set(root.dir = data_dir)
 ```
 
-Our objective is to estimate species-by-DBH stand tables for a forest and its strata from a sparse plot inventory, and understand how model structure affects the estimates and their uncertainty. We add stratum and spatial effects in stages, use magComp to predict counts in unsampled areas, and combine these predictions with observed counts to form stand tables. A mapped census of Harvard Forest provides known values for comparison. Repeating the sampling lets us assess whether estimates tend to run high or low and how often their intervals contain the census values.
+This article examines how model structure affects species-by-DBH stand-table estimates and their uncertainty when only a small part of a forest is sampled. A mapped census of Harvard Forest provides known values for the forest and its four strata. We use sampled plots to fit the models and the census to assess their estimates.
 
-The [species-by-DBH article](full-model-plot-sampling.html) introduces the model using simulated data. Here the population is a real forest, with features that our models may not fully describe. The census provides known targets for assessment; only trees in the sampled plots enter model fitting.
+We work through four steps:
+
+1. **Fit models to one inventory.** Starting with common intercepts, we add stratum and spatial effects in stages and compare fitted counts with observations.
+2. **Assess prediction at held-out plots.** Cross-validation shows how well each model predicts plots excluded from fitting.
+3. **Estimate forest and stratum stand tables.** We predict counts in unsampled areas, add the observed counts, and compare density estimates and intervals with the census.
+4. **Repeat the sampling.** Across 1,000 plot layouts in the same forest, we assess estimation error, interval coverage, and interval width. This shows whether conclusions from one inventory hold as the sampled locations change.
+
+The [species-by-DBH article](full-model-plot-sampling.html) introduces the model using simulated data. Here the population is a real forest, with features that our models may not fully describe. The aim is to understand what additional model structure contributes to the quantities we want to estimate, and where sparse observations still limit inference.
 
 ::: {.alert .alert-info role="note"}
 **Example data and analysis**
@@ -57,11 +64,17 @@ Plots are clipped to the forest and split where they cross stratum boundaries. E
 We begin by reading the polygons and satellite image, then show the strata, plot centers, and plot extents over the forest canopy.
 
 ```{r}
-#| label: sample-map
-#| fig-height: 5
-#| fig-cap: "The four strata over the book's satellite image, with black plot centers and orange circles showing the 9-m-radius plot extents. Only portions inside the forest are sampled; some plots intersect more than one stratum."
+#| label: libraries
 library(magComp)
 library(tidyverse)
+```
+
+```{r}
+#| label: sample-map
+#| code-fold: true
+#| code-summary: "Show plotting code"
+#| fig-height: 5
+#| fig-cap: "The four strata over the book's satellite image, with black plot centers and orange circles showing the 9-m-radius plot extents. Only portions inside the forest are sampled; some plots intersect more than one stratum."
 library(sf)
 library(terra)
 library(tidyterra)
@@ -154,7 +167,7 @@ dat <- magCompData(
 )
 ```
 
-Each model uses three chains of 50,000 iterations. We discard the first 20,000 and retain every tenth draw, leaving 3,000 draws per chain. Prediction uses 333 of these draws per chain, or 999 in total. The conditional DBH factor has many loadings supported by just four strata, so we inspect both its parameters and the fitted quantities they determine.
+Each model uses three chains of 50,000 iterations. We discard the first 20,000 and retain every tenth draw, leaving 3,000 draws per chain. Forest and stratum predictions use 333 of these draws per chain, or 999 in total. The conditional DBH factor has many loadings supported by just four strata, so we inspect both its parameters and the fitted quantities they determine.
 
 We first fit H1, estimating negative-binomial size using its default prior. `n_cores = 3` runs the chains in parallel, with one computational thread per chain.
 
@@ -297,19 +310,6 @@ head(summary(combined))
 plot(h5, parameters = "(Intercept)")
 ```
 
-We check the combined intercepts, fitted cell densities, and population predictions as well as the covariance parameters. The table reports the largest R-hat for each diagnostic category, using 1,000 retained draws per chain for fitting diagnostics and 333 per chain for population summaries. R-hat near one indicates agreement between chains. Inspecting their traces remains useful because chains can agree while exploring only part of a posterior.
-
-```{r}
-#| label: diagnostics
-chain_checks <- read_csv("data/ladder/diagnostics.csv")
-
-chain_checks |>
-  pivot_wider(names_from = scope, values_from = max_rhat) |>
-  knitr::kable(digits = 3)
-```
-
-The largest parameter R-hat is 1.036 for H4's magnitude intercept. Its combined intercepts have maximum R-hat 1.003, illustrating the tradeoff between an intercept and its random effects. The covariance, fitted-density, and prediction diagnostics are also close to one.
-
 We check the magnitude component by comparing observed total tree counts with fitted mean total counts. Each point represents one of the 52 sampled portions, with counts summed over all species and DBH classes. `fitted()` returns expected category counts at these portions; summing the categories gives the fitted total.
 
 ```{r}
@@ -321,6 +321,8 @@ h5_fitted_totals <- rowSums(h5_fitted$count)
 
 ```{r}
 #| label: fitted-counts
+#| code-fold: true
+#| code-summary: "Show plotting code"
 #| fig-height: 5
 #| fig-cap: "Observed and fitted mean total tree counts. Each point represents one sampled portion, summed over all species and DBH classes. The dashed line indicates equality."
 fitted_counts <- read_csv("data/ladder/fitted_counts.csv")
@@ -338,7 +340,65 @@ ggplot(fitted_counts, aes(observed, mean, color = model)) +
   theme_minimal()
 ```
 
-The horizontal bands in H1–H3 arise because equal-area portions have the same fitted count under H1, or the same count within a stratum under H2–H3. Clipped portions have smaller areas and correspondingly lower fitted counts; their agreement with the 1:1 line partly reflects this area adjustment. H4–H5 also allow magnitude to vary spatially, so their fitted counts follow the observed variation more closely. H2 and H3 share the same magnitude model, as do H4 and H5; their differences in composition do not change the total-count model. These are fitted values at sampled locations, so proximity to the line does not establish prediction accuracy elsewhere.
+The horizontal bands in H1–H3 arise because equal-area portions have the same fitted count under H1, or the same count within a stratum under H2–H3. Smaller portions have correspondingly lower fitted counts. H4–H5 also allow magnitude to vary spatially, so their fitted counts follow the observed variation more closely. We next assess prediction at plots excluded from fitting.
+
+### Predict held-out plots
+
+We assess prediction using leave-one-plot-out cross-validation of this first inventory. Each model is fitted to 47 plots and predicts the omitted plot, repeating this for all 48 plots. If a plot crosses a stratum boundary, all its portions are withheld together. The observed counts at that plot are used only to assess its predictions.
+
+`magCompCV()` handles the refitting and prediction. We assign portions to folds using their original `plot_id`, and use the same model formulas and MCMC settings as above. The following call illustrates H5; `cross_validate_ladder.R` runs the comparison for any of H1–H5.
+
+```{r}
+#| label: cross-validation
+#| eval: false
+source("ladder_functions.R")
+formulas <- ladder_formulas("H5")
+
+portions <- trees |> distinct(unit_id, plot_id, area_ha)
+fold_id <- setNames(portions$plot_id, portions$unit_id)
+
+set.seed(1)
+cv <- magCompCV(
+  dat, magnitude = formulas$magnitude, composition = formulas$composition,
+  fold_id = fold_id, target = "observation", type = "count", summary = "samples",
+  control = magCompControl(
+    n_samples = 50000, n_burn = 20000, n_thin = 10,
+    n_chains = 3, n_cores = 3, chain_seeds = 1:3,
+    nb_size = 1000, verbose = FALSE
+  )
+)
+```
+
+For each held-out plot, we sum its portions' predicted counts within each draw and divide by their combined sampled area. Cross-validation uses all 3,000 retained draws per chain. `summarize_ladder_cv.R` compares these predictions with the observed species-by-DBH densities. Mean error indicates overprediction or underprediction, root mean squared prediction error (RMSPE) summarizes error magnitude, and coverage and width describe the pointwise 95% predictive intervals. Each of the 48 × 30 plot cells receives equal weight, including zero counts.
+
+```{r}
+#| label: cross-validation-table
+cv_summary <- read_csv("data/cv/summary.csv")
+
+cv_summary |>
+  select(model, mean_error, rmspe, coverage, mean_width) |>
+  knitr::kable(digits = c(0, 2, 2, 1, 1), col.names = c(
+    "Model", "Mean error (trees/ha)", "RMSPE (trees/ha)",
+    "Coverage (%)", "Mean width (trees/ha)"
+  ))
+```
+
+H5 has the lowest RMSPE, about 6% below H1, but also the widest intervals. All five models have small mean errors and observed-cell coverage of about 97%. The added stratum and spatial structure therefore gives a modest improvement in prediction of the observed cell densities.
+
+We also assess prediction within each stratum, scoring each held-out portion using its own counts and area. Each entry below gives RMSPE (trees/ha), with 95% predictive-interval coverage (%) in parentheses.
+
+```{r}
+#| label: cross-validation-strata
+cv_strata <- read_csv("data/cv/stratum_summary.csv")
+
+cv_strata |>
+  mutate(score = sprintf("%.1f (%.1f)", rmspe, coverage)) |>
+  select(stratum_id, portions, model, score) |>
+  pivot_wider(names_from = model, values_from = score) |>
+  knitr::kable(col.names = c("Stratum", "Portions", paste0("H", 1:5)))
+```
+
+H5 has the lowest RMSPE in strata 2 and 4, while H2 has the lowest in strata 1 and 3. In the wetland stratum, adding stratum effects accounts for most of the improvement. Strata 1 and 3 have only two and three sampled portions, respectively, so their CV scores describe very few locations. These comparisons concern withheld portions; the following sections assess estimates for the full forest and strata against the census.
 
 ## Predict the unsampled forest
 
@@ -367,18 +427,7 @@ h5_predictions <- predict(
 
 ### Add the observed counts
 
-For stratum $h$, species $a$, and DBH class $b$, a population-total draw is
-
-$$
-T^{(\ell)}_{hab}
-= T^{\mathrm{observed}}_{hab}
-+ \widetilde T^{(\ell),\mathrm{unsampled}}_{hab},
-\qquad D^{(\ell)}_{hab}=T^{(\ell)}_{hab}/A_h,
-$$
-
-where $\ell$ indexes retained posterior draws and $A_h$ is the full stratum area. The observed contribution stays fixed across draws. Summing stratum totals and dividing by the forest area gives forest density.
-
-`standSummary(type = "total")` multiplies predicted densities by their represented areas and sums within strata. Here those areas are also the count exposures, so the result is a draw of the unsampled count. We add the observed counts to it using matching stratum and category labels.
+For each species-by-DBH cell, we add its observed count to every draw of its predicted unsampled count. `standSummary(type = "total")` multiplies predicted densities by their represented areas and sums within strata. We then add the observed counts using matching stratum and category labels.
 
 ```{r}
 #| label: add-counts
@@ -430,7 +479,7 @@ forest_summary <- tibble(
 )
 ```
 
-The download's `population_summaries.R` applies these calculations to every model. The intervals summarize the posterior predictive distributions of census densities, conditional on the sampled trees and model assumptions.
+The intervals summarize the posterior predictive distributions of census densities, conditional on the sampled trees and model assumptions.
 
 ## Compare estimates with the census
 
@@ -450,6 +499,8 @@ cell_comparison <- comparison |>
 
 ```{r}
 #| label: forest-comparison
+#| code-fold: true
+#| code-summary: "Show plotting code"
 #| fig-height: 6
 #| fig-cap: "Forest species-by-DBH densities, 95% intervals, and census truth (black marks)."
 forest_comparison <- cell_comparison |> filter(domain == "Forest")
@@ -476,6 +527,8 @@ Stratum comparisons show differences that are less apparent after averaging over
 
 ```{r}
 #| label: stratum-comparison
+#| code-fold: true
+#| code-summary: "Show plotting code"
 #| fig-width: 12
 #| fig-height: 10
 #| fig-cap: "Stratum species-by-DBH densities, 95% intervals, and census truth (black marks)."
@@ -497,12 +550,14 @@ ggplot(stand_comparison, aes(dbh_class, mean, color = model)) +
 
 The wetland stratum has only nine sampled stems, all red maple or white pine, although other species occur in its census. A stratum factor can share information across strata, but cannot determine the missing species and size composition precisely. Wider intervals can be appropriate when this uncertainty is represented.
 
-The common-intercept model cannot represent the wetland's much lower expected stem density. H1 estimates about 590 trees/ha there, compared with census density of 174 trees/ha; H2 estimates about 181 trees/ha after adding stratum effects. H3 also allows within-species DBH allocation to vary by stratum. The spatial terms in H4 and H5 allow further local variation, but do not improve every cell equally.
+The common-intercept model cannot represent the wetland's much lower expected stem density. H1 estimates about 590 trees/ha there, compared with census density of 174 trees/ha; H2 estimates about 181 trees/ha after adding stratum effects.
 
 We also compare overall density, summing all species and DBH classes within each draw. This is a different, less detailed target than any individual stand-table cell.
 
 ```{r}
 #| label: overall-density
+#| code-fold: true
+#| code-summary: "Show plotting code"
 #| fig-height: 5
 #| fig-cap: "Overall density by reporting area. Dashed lines show census truth."
 overall <- comparison |> filter(target == "Overall density")
@@ -518,7 +573,7 @@ ggplot(overall, aes(model, mean, color = model)) +
   theme_minimal()
 ```
 
-This inventory illustrates estimation and uncertainty; it cannot establish repeated-sampling bias or coverage. It also does not imply that the most complex model will be best for every stand-table cell.
+We next repeat the sampling to assess how these estimates and intervals behave as the inventory changes.
 
 ## Repeated sampling of the same forest
 
@@ -526,36 +581,7 @@ We hold the census, boundaries, DBH classes, and nominal prediction-cell areas f
 
 Each fit provides Bayesian inference conditional on its sample and model. The experiment evaluates these estimates and intervals as the sample changes, following the distinction between Bayesian inference and repeated-sampling assessment discussed by @little2012calibrated. A 95% posterior interval need not have 95% repeated-sampling coverage for every fixed forest, especially when the model misses features of that population. We do not simulate new forests from the fitted model.
 
-The results below summarize 1,000 random sampling layouts, including the first inventory illustrated above.
-
-### Reproduce the experiment
-
-The code runs independently of the article. These commands reproduce the 1,000 layouts with four simultaneous layouts and three parallel chains per fit, then produce the summary tables.
-
-```{bash}
-#| eval: false
-export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
-Rscript repeat_ladder.R 1 1000 4 3
-Rscript summarize_ladder_repetitions.R 1 1000
-Rscript export_ladder_example.R
-```
-
-Use a smaller last-layout number to try a shorter experiment. `sample_functions.R` handles the sampling geometry, `ladder_functions.R` contains the five model formulas, and `population_summaries.R` predicts and aggregates counts. `ladder_settings.R` specifies the chain lengths. Every fit uses chain seeds `1:3`; grid placement and prediction use the layout number as their seed. Every model uses the same sample for a given layout.
-
-All 5,000 fits used the same three-chain, 50,000-iteration settings as the first inventory. Sixteen fits exceeded an R-hat screening value of 1.05, mainly for stratum variances and combined species effects. All 1,000 layouts are included in the assessment; the diagnostic summaries are supplied with the results.
-
-```{r}
-#| label: repeated-accounting
-sampling_summary <- read_csv("data/repeated_ladder/sampling_summary.csv")
-repeated_summary <- read_csv("data/repeated_ladder/domain_summary.csv")
-
-sampling_summary |>
-  select(stratum_id, min_portions, median_portions, max_portions, unsampled) |>
-  knitr::kable(col.names = c("Stratum", "Minimum portions", "Median", "Maximum",
-                            "Layouts with no portion"))
-```
-
-Every stratum was sampled in these 1,000 layouts, although stratum 1 sometimes had only one sampled portion. If a layout misses a stratum, it remains a prediction target, with its random effects drawn from the fitted distributions for stratum effects.
+The results below summarize 1,000 random sampling layouts, including the first inventory illustrated above. All five models use the same sample within each layout and the MCMC settings given above. The download's README provides instructions for reproducing the experiment and details of the chain diagnostics.
 
 ### Stand-table accuracy and interval coverage
 
@@ -563,12 +589,16 @@ Here, **repeated-sampling bias** is estimated by averaging each inventory's post
 
 Relative bias expresses the average error as a percentage of the true density. RMSE describes error magnitude, coverage is the percentage of intervals containing the fixed census value, and width summarizes interval length.
 
-The figure summarizes the 30 species-by-DBH cells within each reporting area, including cells with zero census counts. RMSE uses their squared errors; coverage and width average across cells. Bars show Monte Carlo standard errors calculated across inventories, keeping cells from the same inventory together. Lower RMSE is useful, but should be considered together with coverage and width.
+The figure summarizes the 30 species-by-DBH cells within each reporting area, including cells with zero census counts. RMSE uses their squared errors; coverage and width average across cells. Bars show Monte Carlo standard errors calculated across inventories.
 
 ```{r}
 #| label: repeated-performance
+#| code-fold: true
+#| code-summary: "Show plotting code"
 #| fig-height: 10
 #| fig-cap: "RMSE, coverage, and interval width for species-by-DBH densities across 1,000 sampling layouts. Bars show Monte Carlo standard errors; dashed lines mark 95% coverage."
+repeated_summary <- read_csv("data/repeated_ladder/domain_summary.csv")
+
 metric_plot <- repeated_summary |>
   filter(target == "Species-by-DBH") |>
   select(domain, model, rmse, coverage, mean_width, rmse_mcse, coverage_mcse, width_mcse) |>
@@ -592,9 +622,11 @@ ggplot(metric_plot, aes(model, value, color = model)) +
   theme_minimal(base_size = 10)
 ```
 
-Forest-level RMSE is similar across the five models. Differences are larger within strata: H1's average cell coverage ranges from about 48% to 76%, whereas H5's ranges from about 91% to 94%. Allowing stratum differences in species and DBH allocation improves coverage, with additional gains from the spatial terms. These rates average across the 30 stand-table cells; individual species and DBH classes can perform differently.
+Forest-level RMSE is similar across the five models. The benefits of allowing more local variation are clearer within strata. Adding stratum effects to magnitude and species allocation (H1 to H2) substantially reduces RMSE in strata 2–4 and improves coverage in all four strata.
 
-Low coverage means that intervals exclude the true densities too often under this sampling design, giving an overly confident impression of the estimates. H5's coverage is closer to the nominal 95%, supporting more dependable uncertainty reporting for these stratum stand tables. Some of that improvement comes from wider intervals. The more complex models do not uniformly reduce RMSE, so coverage, width, and estimation error should be considered together.
+Allowing DBH allocation within species to vary by stratum (H2 to H3) further improves coverage, although RMSE improves in some strata and increases in others. Adding a spatial magnitude effect (H3 to H4) makes little further difference. Adding the species spatial factor (H4 to H5) reduces RMSE and improves coverage in every stratum. H5's average cell coverage ranges from about 91% to 94%, compared with 48% to 76% for H1. The richer models therefore provide a clearer improvement in stratum-level uncertainty reporting than in forest-level point estimates.
+
+Stratum 1 illustrates why additional complexity is not always better for point estimation. H1 has lower RMSE than H5 there (12.7 versus 14.7 trees/ha), but its coverage is only about 74%, compared with 93% for H5. H5's wider intervals better reflect estimation error across these layouts. Low coverage means that intervals exclude the census values too often, so RMSE alone would miss this difference. These rates average across the 30 stand-table cells; individual species and DBH classes can perform differently.
 
 ### Overall density
 
@@ -618,12 +650,10 @@ Forest overall-density intervals are conservative under this sampling design, wi
 
 Stratum totals can behave differently. H1 substantially overestimates wetland density because it applies a common magnitude across the forest. Stratum effects greatly reduce that error, but wetland relative bias remains about 16% for H2 and H3 and 24% for H4 and H5. H5's 95.1% coverage for overall wetland density accompanies wide intervals; it does not mean the point estimates are unbiased. Sparse observations and a model's ability to describe the population both matter.
 
-The complete area summaries are in `data/repeated_ladder/domain_summary.csv`, and individual-cell results are in `target_summary.csv` in that directory. Small average bias can hide errors of opposite signs, and average coverage can hide poorly estimated species or size classes.
-
 ## What this example establishes
 
-Stratum and spatial effects allow abundance and composition to vary across the forest while sharing information among sampled locations. Forest averages alone show little separation in point-estimate accuracy among the models; stratum stand tables reveal differences that matter for local estimates. H5 gives substantially better interval coverage than the common-intercept model, but additional complexity does not eliminate bias or uniformly improve point estimates.
+Across repeated samples, similar forest-level RMSE conceals important differences within strata. Stratum effects account for much of the improvement in local point estimates, while the DBH stratum factor and species spatial factor improve interval coverage. H1 still gives lower RMSE in stratum 1. Additional complexity therefore needs to be assessed for the intended reporting areas, considering estimation error, interval coverage, and interval width together.
 
-The workflow connects a partial inventory to forest and stratum summaries by combining observed counts with posterior predictions for unsampled areas. Aggregating within each draw preserves the uncertainty needed for those summaries. Repeated sampling then assesses estimation error, interval coverage, and width against the known census as the inventory changes. These checks should focus on the quantities managers need: good forest averages can coexist with poor estimates for particular strata or stand-table cells.
+Cross-validation checks prediction at omitted plots. The census comparisons assess forest and stratum estimates formed by combining observed counts with predictions for unsampled areas. Repeating the inventory shows how those estimates behave as the sample changes. These assessments complement one another: similar plot-level scores or forest averages can conceal differences that matter for local stand tables.
 
 ## References
