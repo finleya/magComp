@@ -26,9 +26,9 @@ knitr::opts_knit$set(root.dir = data_dir)
 The [magnitude article](magnitude-plot-sampling.html) related log tree density
 to canopy height with a linear regression. Here we allow that relationship
 to be nonlinear, using a Gaussian process to share information among similar
-canopy heights. This uses the same process machinery as the
-[spatial article](spatial-effects-plot-sampling.html), but similarity is
-defined by canopy height rather than geographic distance.
+canopy heights. This uses the same approach as the
+[spatial article](spatial-effects-plot-sampling.html), with differences in
+canopy height taking the place of geographic distance.
 
 We first estimate a nonlinear canopy-height relationship and predict counts
 at held-out plots. In a second example, we let the slope for canopy cover
@@ -48,10 +48,9 @@ We use its plot areas and canopy heights, described in the
 ## Simulate a nonlinear relationship
 
 We read the 151 sampled plots and select 150 prediction cells as holdouts.
-The supplied `x` column is p95 standardized using the sampled plots' mean
-and standard deviation. We name it `height` here to make the formulas clear.
-Standardizing also gives the process a distance scale of one standard
-deviation of canopy height.
+We use `scale()` to standardize p95, giving `std_p95` a mean of zero and
+standard deviation of one among the sampled plots. We apply the plots' mean
+and standard deviation to the holdouts so both use the same scale.
 
 ```{r}
 #| label: simulate-nonlinear
@@ -61,15 +60,18 @@ library(tidyverse)
 set.seed(1)
 
 plots <- read_csv("data/plots.csv") |>
-  select(plot_id, area, p95, height = x)
+  select(plot_id, area, p95) |>
+  mutate(std_p95 = as.numeric(scale(p95)))
 
 holdout <- read_csv("data/prediction.csv") |>
-  select(plot_id, area, p95, height = x) |>
-  slice_sample(n = 150)
+  select(plot_id, area, p95) |>
+  slice_sample(n = 150) |>
+  mutate(std_p95 = as.numeric(scale(p95, center = mean(plots$p95),
+                                    scale = sd(plots$p95))))
 ```
 
-Let $h_i$ denote standardized canopy height. We generate expected density
-$M_i$ in trees/ha and total count $N_i$ on area $a_i$ hectares from
+Let $h_i$ denote standardized canopy height (`std_p95`). We generate expected
+density $M_i$ in trees/ha and total count $N_i$ on area $a_i$ hectares from
 
 $$
 \log M_i=\log(350)-0.6\tanh(h_i),\qquad
@@ -84,11 +86,11 @@ only the sampled plots for fitting.
 ```{r}
 #| label: generate-counts
 plots <- plots |>
-  mutate(truth = 350 * exp(-0.6 * tanh(height)),
+  mutate(truth = 350 * exp(-0.6 * tanh(std_p95)),
          count = rnbinom(n(), mu = area * truth, size = 1000))
 
 holdout <- holdout |>
-  mutate(truth = 350 * exp(-0.6 * tanh(height)),
+  mutate(truth = 350 * exp(-0.6 * tanh(std_p95)),
          count = rnbinom(n(), mu = area * truth, size = 1000))
 ```
 
@@ -106,7 +108,7 @@ dat <- magCompData(plots, unit = plot_id, tree_count = count,
 
 fit <- magComp(
   dat,
-  magnitude = ~ gp(height, name = "height_effect"),
+  magnitude = ~ gp(std_p95, name = "height_effect"),
   composition = NULL,
   control = magCompControl(n_samples = 6000, n_burn = 2000,
     n_chains = 3, n_cores = 3, chain_seeds = 1:3,
@@ -152,9 +154,9 @@ for predictions.
 #| label: predict-relationship
 height_grid <- tibble(
   plot_id = 1:100,
-  height = seq(min(plots$height), max(plots$height), length.out = 100)
+  std_p95 = seq(min(plots$std_p95), max(plots$std_p95), length.out = 100)
 ) |>
-  mutate(truth = 350 * exp(-0.6 * tanh(height)))
+  mutate(truth = 350 * exp(-0.6 * tanh(std_p95)))
 
 set.seed(1)
 
@@ -169,7 +171,7 @@ relationship_summary <- summary(relationship) |>
 ```{r}
 #| label: fig-nonlinear-relationship
 #| fig-cap: "Expected tree density versus standardized canopy height. The blue line and band give the posterior mean and pointwise 95% credible interval; the black dashed line is the generating relationship. Gray points are observed counts divided by plot area."
-ggplot(relationship_summary, aes(height, mean)) +
+ggplot(relationship_summary, aes(std_p95, mean)) +
   geom_ribbon(aes(ymin = q2_5, ymax = q97_5), fill = "#0072B2", alpha = 0.2) +
   geom_point(data = plots, aes(y = count / area), color = "grey50", alpha = 0.5) +
   geom_line(color = "#0072B2") +
@@ -225,15 +227,16 @@ We reuse the plot areas and heights, simulate canopy cover between 20% and
 standardized cover, the generating model is
 
 $$
-\log M_i=\log(350)+0.2h_i+b(h_i)c_i,\qquad
-b(h)=0.3-0.4\tanh(h).
+\log M_i=\log(350)-0.2h_i+b(h_i)c_i,\qquad
+b(h)=0.3-0.3\tanh(h).
 $$
 
+Here $b(h_i)$ is the canopy-cover slope at height $h_i$.
+At average cover, expected stem density decreases with canopy height.
 At fixed height, increasing cover by one standard deviation multiplies
-expected density by $\exp\{b(h)\}$. Cover has a stronger positive association
-with density at shorter canopy heights in this population. At average height,
-$b(0)=0.3$, so this increase in cover multiplies density by $\exp(0.3)$,
-about 1.35.
+expected density by $\exp\{b(h)\}$. This cover effect is positive and weakens
+at taller canopy heights. At average height, $b(0)=0.3$, so this increase in
+cover multiplies density by $\exp(0.3)$, about 1.35.
 
 ```{r}
 #| label: simulate-varying-slope
@@ -242,8 +245,8 @@ set.seed(1)
 varying_plots <- plots |>
   mutate(canopy_cover = runif(n(), 20, 90),
          cover = as.numeric(scale(canopy_cover)),
-         true_slope = 0.3 - 0.4 * tanh(height),
-         truth = exp(log(350) + 0.2 * height + true_slope * cover),
+         true_slope = 0.3 - 0.3 * tanh(std_p95),
+         truth = exp(log(350) - 0.2 * std_p95 + true_slope * cover),
          count = rnbinom(n(), mu = area * truth, size = 1000))
 ```
 
@@ -253,9 +256,9 @@ $$
 \log M_i=\beta_0+\beta_h h_i+\{\beta_c+v(h_i)\}c_i.
 $$
 
-The fixed `cover` term supplies $\beta_c$, and `cover:gp(height)` supplies
-$c_i v(h_i)$. Together they estimate the cover slope $\beta_c+v(h_i)$.
-In `cover:gp(height)`, `height` determines where the coefficient varies,
+We estimate $b(h_i)$ as $\beta_c+v(h_i)$, combining a fixed slope with a
+Gaussian-process effect through `cover + cover:gp(std_p95)`.
+In `cover:gp(std_p95)`, `std_p95` determines where the coefficient varies,
 and `cover` multiplies that coefficient in the regression.
 
 ```{r}
@@ -265,7 +268,7 @@ varying_dat <- magCompData(varying_plots, unit = plot_id, tree_count = count,
 
 varying_fit <- magComp(
   varying_dat,
-  magnitude = ~ height + cover + cover:gp(height, name = "cover_slope"),
+  magnitude = ~ std_p95 + cover + cover:gp(std_p95, name = "cover_slope"),
   composition = NULL,
   control = magCompControl(n_samples = 6000, n_burn = 2000,
     n_chains = 3, n_cores = 3, chain_seeds = 1:3,
@@ -298,7 +301,7 @@ multiplied by cover.
 ```{r}
 #| label: predict-slopes
 slope_grid <- height_grid |>
-  mutate(cover = 0, true_slope = 0.3 - 0.4 * tanh(height))
+  mutate(cover = 0, true_slope = 0.3 - 0.3 * tanh(std_p95))
 
 set.seed(1)
 
@@ -314,12 +317,12 @@ slope_summary <- summary(samples(slope_predictions, type = "combined")) |>
 ```{r}
 #| label: fig-varying-slope
 #| fig-cap: "The canopy-cover slope as a function of standardized canopy height. Blue shows its posterior mean and pointwise 95% credible interval; the black dashed line shows the generating slope. Tick marks locate the sampled canopy heights."
-ggplot(slope_summary, aes(height, mean)) +
+ggplot(slope_summary, aes(std_p95, mean)) +
   geom_hline(yintercept = 0, color = "grey70") +
   geom_ribbon(aes(ymin = q2_5, ymax = q97_5), fill = "#0072B2", alpha = 0.2) +
   geom_line(color = "#0072B2") +
   geom_line(aes(y = true_slope), linetype = "dashed") +
-  geom_rug(data = plots, aes(x = height), inherit.aes = FALSE, alpha = 0.3) +
+  geom_rug(data = plots, aes(x = std_p95), inherit.aes = FALSE, alpha = 0.3) +
   labs(x = "Standardized canopy height", y = "Combined cover slope (log-density scale)") +
   theme_minimal()
 ```
@@ -335,16 +338,16 @@ poorly represented by the sampled plots.
 To see what these slopes imply in trees/ha, we predict expected density at
 low, average, and high cover, defined as one standard deviation below the
 sample mean, the mean itself, and one standard deviation above it. Each row
-of the prediction table is one height--cover combination. Rows at the same
+of the prediction table is one combination of height and cover. Rows at the same
 height share the predicted process effect, which is multiplied by their
 respective cover values.
 
 ```{r}
 #| label: predict-cover-relationships
-cover_grid <- expand_grid(height = height_grid$height, cover = c(-1, 0, 1)) |>
+cover_grid <- expand_grid(std_p95 = height_grid$std_p95, cover = c(-1, 0, 1)) |>
   mutate(plot_id = row_number(),
-         truth = exp(log(350) + 0.2 * height +
-                       (0.3 - 0.4 * tanh(height)) * cover),
+         truth = exp(log(350) - 0.2 * std_p95 +
+                       (0.3 - 0.3 * tanh(std_p95)) * cover),
          cover_level = factor(cover, levels = c(-1, 0, 1),
            labels = c("Low cover (−1 SD)", "Average cover", "High cover (+1 SD)")))
 
@@ -362,7 +365,7 @@ cover_summary <- summary(cover_predictions) |>
 #| label: fig-cover-relationships
 #| fig-width: 8
 #| fig-cap: "Expected tree density at three canopy-cover levels. Blue lines and bands show posterior means and pointwise 95% credible intervals; black dashed lines show the generating relationships. All panels use the same axes."
-ggplot(cover_summary, aes(height, mean)) +
+ggplot(cover_summary, aes(std_p95, mean)) +
   geom_ribbon(aes(ymin = q2_5, ymax = q97_5), fill = "#0072B2", alpha = 0.2) +
   geom_line(color = "#0072B2") +
   geom_line(aes(y = truth), linetype = "dashed") +
@@ -373,28 +376,28 @@ ggplot(cover_summary, aes(height, mean)) +
 
 At shorter canopy heights, the positive cover slope gives higher densities
 in the high-cover panel. The differences shrink as the cover slope approaches
-zero at taller heights. At average cover, $c_i=0$, so the curve depends only
-on the intercept and linear height term. Its narrower band reflects uncertainty
-in those coefficients; the other panels also include uncertainty in the
-height-dependent cover effect.
+zero at taller heights. At average cover, $c_i=0$, so density decreases with
+height according to the intercept and linear height term. Its narrower band
+reflects uncertainty in those coefficients; the other panels also include
+uncertainty in the height-dependent cover effect.
 
 ## Extend the same ideas
 
-`gp(height, cover)` defines a process over two covariates using Euclidean
+`gp(std_p95, cover)` defines a process over two covariates using Euclidean
 distance. Their scales therefore matter; standardize or otherwise scale them
 to express a meaningful distance before fitting. A process with identical
 inputs shares one latent effect across observations. Each observation still
 needs its own `unit` ID to keep its count and area separate. Shared effects
 do not force equal counts or expected densities when other covariates differ.
 
-For larger datasets, `nngp(height, m = 15)` uses the nearest-neighbor
+For larger datasets, `nngp(std_p95, m = 15)` uses the nearest-neighbor
 approximation with neighbors in covariate space. Both forms support the
 same varying-coefficient syntax. These terms describe covariate relationships;
 geographic coordinates would be needed for an additional spatial effect.
 
 Composition models use `factor_gp()` or `factor_nngp()` in the same way.
 For example, a species formula could include
-`species ~ cover + cover:factor_gp(height, K = 1, anchors = "pine")`.
+`species ~ cover + cover:factor_gp(std_p95, K = 1, anchors = "pine")`.
 The shared factor and species loadings then let cover slopes vary with height
 on the probit allocation scale. The
 [conditional DBH article](conditional-dbh-effects-plot-sampling.html) explains
