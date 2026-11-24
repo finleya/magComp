@@ -16,7 +16,7 @@ factor_gp(...)
 factor_nngp(...)
 }
 \arguments{
-  \item{...}{Grouping or coordinate column names and term settings described below.}
+  \item{...}{Grouping or numeric process-input column names and term settings described below.}
 }
 \description{
 Formula-only markers for magnitude iid, GP, and NNGP effects and composition
@@ -30,14 +30,20 @@ Each magnitude process has its own estimated variance. Composition uses
 \code{factor_nngp(x, y, K = 1, m = 15)}. Its factors have unit variance. Unconstrained loadings have normal priors;
 positive anchor-diagonal loadings have half-normal priors.
 
-For each spatial term, different sampling units must have distinct coordinate
-vectors. Exact duplicate locations cause an error during model preparation
-that identifies the term and affected unit IDs. Nearby but distinct locations
-are allowed. Multiple tree records within one unit and the repeated unit rows
-in conditional allocation blocks are allowed; those rows share the unit's
-spatial effects. This restriction applies to fitting. Repeated prediction
-coordinates share a spatial-effect draw as described in
-\code{\link[=predict.magComp]{predict}}.
+GP and NNGP inputs may be one or more numeric covariates rather than geographic
+coordinates. For example, \code{gp(height)} describes a nonlinear height
+relationship, while \code{gp(height, cover)} uses distances in the joint
+height-cover space. Inputs are not standardized automatically; choose their
+scales before fitting, and use the same scales for prediction.
+
+Within each term, observations with identical input vectors share one latent
+process value. Each observation retains its own count, sampled area, and
+covariates, and observations are conditionally independent given the model
+parameters and effects. Use a separate unit ID for each measurement; multiple
+tree records with the same unit ID are combined by \code{\link{magCompData}}.
+Child allocation rows share their unit's process values. Predictions at
+identical inputs also share latent draws, while observation draws remain
+separate. See \code{\link[=predict.magComp]{predict}}.
 
 Spatial calculations use the specified correlation matrices without diagonal
 additions or conditional-variance clipping. Failed covariance calculations
@@ -52,10 +58,11 @@ formula order within each type. Use these names for overrides in
 Spatial terms accept \code{cov_model}: \code{"exp"} (default), \code{"matern"},
 \code{"sep_exp"}, \code{"multi_res_sep_exp"}, or \code{"gneiting"}.
 For a space-time family, supply numeric time as the final coordinate, for example
-\code{nngp(x, y, year, cov_model = "sep_exp", m = 15)}. Repeated sites at
-\emph{different} times are then allowed; repeated full space-time coordinates
-for different sampling units remain an error. A spatial-only term on revisited
-sites is not supported.
+\code{nngp(x, y, year, cov_model = "sep_exp", m = 15)}. A space-time term
+shares effects at identical location-time inputs; different times have distinct
+latent values. A spatial-only term such as \code{gp(x, y)} shares an effect
+across visits to the same site. Both can appear in the same model. Space-time
+families require at least one spatial input plus time.
 
 NNGP neighbors use Euclidean spatial distance and absolute time separation,
 combined as \eqn{\sqrt{h^2+(s u)^2}}, where \code{st_scale = s} defaults to one.
@@ -86,6 +93,10 @@ Colon interactions such as \code{height:iid(stand)} or
 \code{height:factor_nngp(x, y, K = 1)} multiply the latent contribution by the
 covariate. Include \code{height} separately for an average regression slope.
 Multiple terms may be used in each component or allocation block.
+Likewise, \code{x + x:gp(height)} gives a coefficient of \code{x} that varies
+with height. Inspect the sum of the fixed coefficient and its process effect
+using \code{samples(fit, type = "combined")} or
+\code{summary(fit, type = "combined")}.
 
 Named arguments are limited to those described above. Unknown arguments
 are rejected. Set priors and initial values through their dedicated interfaces.
@@ -101,4 +112,6 @@ identification sections in \link{magComp-package}.}
 # These are formula objects, to be supplied to magComp().
 ~ height + iid(stand, name = "stand") + nngp(x, y, m = 15)
 ~ height + factor_nngp(x, y, K = 2, name = "spatial")
+~ gp(height, name = "height")
+~ x + x:nngp(height, name = "height_slope")
 }

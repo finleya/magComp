@@ -52,9 +52,10 @@ GP population again; the optional generator uses seed 1.
 
 ## Read the repeated measurements
 
-`site_id` identifies a physical location. `plot_id` identifies a measurement
-at a particular site and year, so repeated measurements have different
-`plot_id` values. The prediction file contains the 4,812 forest cells in
+`plot_id` identifies a physical plot. `measurement_id` identifies an individual
+measurement, so visits to the same plot have different `measurement_id` values.
+We pass `measurement_id` to `magCompData()` to keep their counts separate.
+Coordinates and time determine which latent effects they share. The prediction file contains the 4,812 forest cells in
 years 0 and 9. `location_id` links each prediction to its cell polygon.
 
 ```{r}
@@ -93,6 +94,35 @@ ggplot() +
   coord_sf(datum = NA) +
   theme_void()
 ```
+
+### Shared locations and separate observations
+
+In this example each plot is measured at most once per year. Two measurements
+at the same coordinates and year would still need different `measurement_id`
+values. For example, with unchanged coordinates for plot 7,
+
+| measurement_id | plot_id | year |
+|---:|---:|---:|
+| 1 | 7 | 0 |
+| 2 | 7 | 0 |
+| 3 | 7 | 1 |
+
+the first two observations share a space-time effect; the third has an effect
+at the later year. All three count observations are kept separate and are
+modeled as independent conditional on the parameters and latent effects.
+Repeated rows with the same `unit` ID describe one count observation;
+their counts are summed. That is useful for tree records, but
+`unit = plot_id` would not keep these visits as separate observations.
+
+A spatial term such as `nngp(easting_km, northing_km)` shares one effect across
+all visits to a location. Adding `year` with `cov_model = "sep_exp"` gives an
+effect that can change between years. These terms can also be used together
+to represent persistent spatial variation and additional space-time variation.
+The model below uses only the space-time term.
+
+When assessing predictions at new plots by cross-validation, keep all visits
+to each `plot_id` in the same fold. Holding out a single visit instead assesses
+prediction with measurements from that plot potentially available in other years.
 
 ## Describe the space-time model
 
@@ -178,7 +208,7 @@ them to species and DBH classes, and writes the CSV files. Run
 
 We arrange the counts into one row per measurement, species, and DBH class.
 Time belongs to the measurement, so every category row for a given
-`plot_id` has the same year and coordinates.
+`measurement_id` has the same year and coordinates.
 
 ```{r}
 #| label: model-data
@@ -186,13 +216,13 @@ species_order <- c("pine", "oak", "birch")
 dbh_classes <- c("10-20", "20-30", "30-40", "40-50", "50+")
 
 trees <- plots |>
-  select(plot_id, area, x, easting_km, northing_km, year, contains(":")) |>
+  select(measurement_id, plot_id, area, x, easting_km, northing_km, year, contains(":")) |>
   pivot_longer(contains(":"), names_to = c("species", "dbh_class"),
                names_sep = ":", values_to = "count") |>
   mutate(species = factor(species, levels = species_order),
          dbh_class = ordered(dbh_class, levels = dbh_classes))
 
-dat <- magCompData(trees, unit = plot_id, categories = c(species, dbh_class),
+dat <- magCompData(trees, unit = measurement_id, categories = c(species, dbh_class),
   tree_count = count, ordered = c(species = FALSE, dbh_class = TRUE),
   design = fixedArea(area))
 ```
@@ -232,8 +262,9 @@ fit <- magComp(
 )
 ```
 
-Each chain retains 5,000 draws. Size remains fixed because the magnitude model
-includes a random effect. `magCompCovModels()` lists the other available
+Each chain retains 5,000 draws. We fix size at 1,000, following the default
+for models with magnitude random effects. An explicit Gamma prior can request
+size estimation instead, as described in the [stratum article](stratum-effects-plot-sampling.html). `magCompCovModels()` lists the other available
 covariance families. `magCompSettings(fit)` reports resolved priors, starting
 values, and tuning. A covariance parameter can be held fixed with
 `fixed(value)` in its corresponding starting entry.
@@ -290,7 +321,7 @@ set.seed(1)
 
 predictions <- predict(
   fit,
-  prediction |> select(plot_id, area, x, easting_km, northing_km, year),
+  prediction |> select(measurement_id, area, x, easting_km, northing_km, year),
   type = "density", target = "observation", summary = "samples",
   n_draws = 50, keep_effects = TRUE
 )
@@ -306,18 +337,18 @@ the density predictions.
 ```{r}
 #| label: map-values
 intercept_summary <- summary(samples(predictions, type = "combined")) |>
-  mutate(plot_id = as.integer(unit),
+  mutate(measurement_id = as.integer(unit),
          component = if_else(component == "magnitude", "Magnitude", str_to_title(stick)))
 
 true_intercepts <- prediction |>
-  select(plot_id, location_id, year, magnitude_intercept, pine_intercept, oak_intercept) |>
+  select(measurement_id, location_id, year, magnitude_intercept, pine_intercept, oak_intercept) |>
   pivot_longer(ends_with("intercept"), names_to = "component", values_to = "truth") |>
   mutate(component = recode(component, magnitude_intercept = "Magnitude",
                              pine_intercept = "Pine", oak_intercept = "Oak"))
 
 map_values <- intercept_summary |>
-  select(plot_id, component, Estimate = mean) |>
-  left_join(true_intercepts, by = c("plot_id", "component")) |>
+  select(measurement_id, component, Estimate = mean) |>
+  left_join(true_intercepts, by = c("measurement_id", "component")) |>
   rename(Truth = truth) |>
   pivot_longer(c(Truth, Estimate), names_to = "source", values_to = "intercept") |>
   mutate(source = factor(source, levels = c("Truth", "Estimate")))
@@ -361,7 +392,7 @@ group would average across both years, which is a different target.
 ```{r}
 #| label: forest-summary
 forest_predictions <- standSummary(
-  predictions, data = prediction, unit = plot_id, group = year,
+  predictions, data = prediction, unit = measurement_id, group = year,
   represented_area = area, summary = "samples"
 )
 

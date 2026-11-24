@@ -1,3 +1,31 @@
+# magComp 0.0.8
+
+* Allow separate observations to share GP or NNGP effects at identical inputs.
+  Each observation retains its own count, sampled area, and covariates. Shared
+  effects work in magnitude and composition models, including conditional
+  allocation, varying slopes, and space-time terms.
+* Support one-dimensional and multivariate covariate inputs, such as
+  `gp(height)`, `gp(height, cover)`, and `x:nngp(height)`, for nonlinear and
+  varying-coefficient relationships. Input scaling remains under user control.
+* Map observations to distinct process inputs throughout fitting, starting
+  values, prediction, combined-coefficient summaries, and cross-validation.
+  Existing models with distinct inputs retain their ordering and calculations.
+* Allow an explicit Gamma prior to request negative-binomial size estimation
+  alongside magnitude random effects. Automatic defaults remain unchanged:
+  estimate size without magnitude random effects and fix it otherwise.
+
+* Support data and cross-validation training folds with all-zero counts.
+  Magnitude uses the zero-count likelihood; composition with no allocation
+  information is governed by its priors.
+
+* Reject fractional chain counts, worker counts, and Metropolis batch lengths
+  instead of silently truncating them.
+
+* Add an article on nonlinear covariate effects and varying coefficients.
+  Update the space-time article to distinguish plot and measurement IDs and
+  explain shared effects, and clarify size-estimation options in the
+  random-effect articles.
+
 # magComp 0.0.7
 
 * Improve exploration of composition factor signs by sampling unrestricted

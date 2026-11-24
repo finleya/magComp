@@ -83,6 +83,10 @@ probability or count predictions need no areas; conditional densities do.
 Folds are fitted sequentially. \code{control$n_cores} parallelizes chains
 within a fit, not folds. With no supplied \code{fold_id}, units are randomly
 assigned to approximately equal-sized folds.
+With repeated measurements, use \code{fold_id} to hold all measurements from
+the same site out together when assessing prediction at new sites. Holding
+out one measurement while retaining others at that site assesses prediction
+with information about its shared effect.
 
 Each fold uses one joint prediction call, including every fitted model term.
 All requested quantities and within-unit totals use the same draws. Totals

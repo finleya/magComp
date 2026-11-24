@@ -1,0 +1,348 @@
+---
+title: "Nonlinear covariate effects and varying coefficients"
+description: "Use Gaussian processes over covariates to estimate nonlinear density relationships and slopes that vary with canopy height."
+resources:
+  - downloads/plot-sampling.zip
+format:
+  html:
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+    code-overflow: wrap
+    html-math-method: katex
+---
+
+```{r}
+#| label: setup
+#| include: false
+Sys.setenv(TZ = "UTC")
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>", message = FALSE,
+                      fig.width = 7, fig.height = 4)
+data_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)),
+                                    "../../dev/article-data/plot-sampling"))
+knitr::opts_knit$set(root.dir = data_dir)
+```
+
+A linear regression need not describe the relationship between tree density
+and canopy height. Gaussian processes can estimate a nonlinear relationship
+by sharing information among similar covariate values. The same machinery
+can let the effect of one covariate vary with another.
+
+We demonstrate both uses with magnitude-only models. First we estimate a
+nonlinear canopy-height relationship and predict counts at held-out plots.
+Then we let the slope for canopy cover vary with canopy height and compare
+the estimated slope with its known value. Unlike the
+[spatial example](spatial-effects-plot-sampling.html), similarity here is
+defined by covariates rather than geographic distance.
+
+::: {.alert .alert-info role="note"}
+**Example data**
+
+[Download the plot-sampling data (ZIP)](downloads/plot-sampling.zip){.btn .btn-primary download="plot-sampling.zip"}
+
+Extract it and use the folder containing `data/` as your R working directory.
+We use its plot areas and canopy heights, described in the
+[data article](plot-sampling-data.html), and simulate new counts below.
+:::
+
+## Simulate a nonlinear relationship
+
+We read the 151 sampled plots and select 150 prediction cells as holdouts.
+The supplied `x` column is p95 standardized using the sampled plots' mean
+and standard deviation. We name it `height` here to make the formulas clear.
+Standardizing also gives the process a distance scale of one standard
+deviation of canopy height.
+
+```{r}
+#| label: simulate-nonlinear
+library(magComp)
+library(tidyverse)
+
+set.seed(1)
+
+plots <- read_csv("data/plots.csv") |>
+  select(plot_id, area, p95, height = x)
+
+holdout <- read_csv("data/prediction.csv") |>
+  select(plot_id, area, p95, height = x) |>
+  slice_sample(n = 150)
+```
+
+Let $h_i$ denote standardized canopy height. We generate expected density
+$M_i$ in trees/ha and total count $N_i$ on area $a_i$ hectares from
+
+$$
+\log M_i=\log(350)-0.6\tanh(h_i),\qquad
+N_i\mid M_i,r_M\sim\operatorname{NB}(a_iM_i,r_M),\qquad r_M=1000.
+$$
+
+The hyperbolic tangent, `tanh()`, describes a decrease that levels off at
+shorter and taller canopy heights. At average canopy height the expected
+density is 350 trees/ha. We generate counts for both sets of locations, using
+only the sampled plots for fitting.
+
+```{r}
+#| label: generate-counts
+plots <- plots |>
+  mutate(truth = 350 * exp(-0.6 * tanh(height)),
+         count = rnbinom(n(), mu = area * truth, size = 1000))
+
+holdout <- holdout |>
+  mutate(truth = 350 * exp(-0.6 * tanh(height)),
+         count = rnbinom(n(), mu = area * truth, size = 1000))
+```
+
+## Fit a process over canopy height
+
+We fit $\log M_i=\beta_0+v(h_i)$, where $v$ is a zero-mean Gaussian process.
+The default exponential covariance makes effects more similar at nearby
+heights. Its variance and decay are estimated. We do not supply the generating
+`tanh()` relationship to the model.
+
+```{r}
+#| label: fit-nonlinear
+dat <- magCompData(plots, unit = plot_id, tree_count = count,
+                   design = fixedArea(area))
+
+fit <- magComp(
+  dat,
+  magnitude = ~ gp(height, name = "height_effect"),
+  composition = NULL,
+  control = magCompControl(n_samples = 6000, n_burn = 2000,
+    n_chains = 3, n_cores = 3, chain_seeds = 1:3,
+    nb_size = 1000, verbose = FALSE)
+)
+
+summary(fit) |>
+  select(symbol, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(digits = 3)
+```
+
+Size is fixed at 1,000, following the default when magnitude has random effects.
+An explicit Gamma prior can request size estimation instead, as described in
+the [stratum article](stratum-effects-plot-sampling.html). We use automatic
+priors and starting values for the other parameters.
+
+The separate intercept has an R-hat of about 1.49, whereas those for the
+variance and decay are close to one. The intercept and process can trade off
+while their sum remains well estimated.
+The combined coefficient $\beta_0+v(h_i)$ is the log expected density at each
+height. We inspect its chain diagnostics with the same interface used for
+spatial and stratum effects. This table summarizes the mean combined
+coefficient over sampled plots, calculated separately within each draw.
+
+```{r}
+#| label: nonlinear-combined-diagnostics
+summary(fit, type = "combined", group = ".all") |>
+  select(coefficient, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(digits = 3)
+```
+
+The combined coefficient has an R-hat close to one. We use this sum to
+describe the density relationship; the separate intercept's summary does
+not have the same chain agreement.
+
+### Compare the estimated relationship with truth
+
+We predict along a sequence of canopy heights. The expected target returns
+draws of $M_i$, including uncertainty in the process and its parameters.
+Its interval describes the mean relationship, rather than the additional
+variation of a new tree count. Here `plot_id` labels evaluation points;
+their heights determine the process predictions. We use 200 draws per chain
+for predictions.
+
+```{r}
+#| label: predict-relationship
+height_grid <- tibble(
+  plot_id = 1:100,
+  height = seq(min(plots$height), max(plots$height), length.out = 100)
+) |>
+  mutate(truth = 350 * exp(-0.6 * tanh(height)))
+
+set.seed(1)
+
+relationship <- predict(fit, height_grid, type = "magnitude",
+                        target = "expected", summary = "samples", n_draws = 200)
+
+relationship_summary <- summary(relationship) |>
+  mutate(plot_id = as.integer(unit)) |>
+  left_join(height_grid, by = "plot_id")
+```
+
+```{r}
+#| label: fig-nonlinear-relationship
+#| fig-cap: "Expected tree density versus standardized canopy height. The blue line and band give the posterior mean and pointwise 95% credible interval; the black dashed line is the generating relationship. Gray points are observed counts divided by plot area."
+ggplot(relationship_summary, aes(height, mean)) +
+  geom_ribbon(aes(ymin = q2_5, ymax = q97_5), fill = "#0072B2", alpha = 0.2) +
+  geom_point(data = plots, aes(y = count / area), color = "grey50", alpha = 0.5) +
+  geom_line(color = "#0072B2") +
+  geom_line(aes(y = truth), linetype = "dashed") +
+  labs(x = "Standardized canopy height", y = "Expected density (trees/ha)") +
+  theme_minimal()
+```
+
+The estimate follows the nonlinear decrease where sampled heights are well
+represented. The wide band between the shortest plot and the remaining
+plots reflects how little information is available there.
+
+### Predict held-out counts
+
+For a new count we use the observation target, which also draws from the
+negative-binomial distribution using each holdout's area. The generating
+counts provide a comparison that was not available during fitting.
+
+```{r}
+#| label: predict-holdout
+set.seed(1)
+
+predictions <- predict(fit, holdout, type = "count", target = "observation",
+                       summary = "samples", n_draws = 200)
+
+prediction_summary <- summary(predictions) |>
+  mutate(plot_id = as.integer(unit)) |>
+  left_join(holdout, by = "plot_id")
+
+count_limits <- c(0, max(prediction_summary$count, prediction_summary$q97_5))
+```
+
+```{r}
+#| label: fig-heldout-counts
+#| fig-cap: "Observed versus predicted counts for 150 holdouts. Points and bars show posterior predictive means and 95% intervals. The dashed line marks equal observed and predicted counts."
+ggplot(prediction_summary, aes(count, mean)) +
+  geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey50") +
+  geom_errorbar(aes(ymin = q2_5, ymax = q97_5), width = 0,
+                color = "#0072B2", alpha = 0.2) +
+  geom_point(color = "#0072B2", alpha = 0.6) +
+  coord_equal(xlim = count_limits, ylim = count_limits) +
+  labs(x = "Observed count", y = "Predicted count") +
+  theme_minimal()
+```
+
+## Let a slope vary with canopy height
+
+A canopy-cover effect might differ between short and tall stands. We now
+simulate canopy cover between 20% and 90%, standardize it, and generate a second set of counts
+with a height-dependent cover slope. Writing $c_i$ for standardized cover,
+
+$$
+\log M_i=\log(350)+0.2h_i+b(h_i)c_i,\qquad
+b(h)=0.3-0.4\tanh(h).
+$$
+
+At fixed height, increasing cover by one standard deviation multiplies
+expected density by $\exp\{b(h)\}$. Cover has a stronger positive association
+with density at shorter canopy heights in this population.
+
+```{r}
+#| label: simulate-varying-slope
+set.seed(1)
+
+varying_plots <- plots |>
+  mutate(canopy_cover = runif(n(), 20, 90),
+         cover = as.numeric(scale(canopy_cover)),
+         true_slope = 0.3 - 0.4 * tanh(height),
+         truth = exp(log(350) + 0.2 * height + true_slope * cover),
+         count = rnbinom(n(), mu = area * truth, size = 1000))
+
+varying_dat <- magCompData(varying_plots, unit = plot_id, tree_count = count,
+                           design = fixedArea(area))
+
+varying_fit <- magComp(
+  varying_dat,
+  magnitude = ~ height + cover + cover:gp(height, name = "cover_slope"),
+  composition = NULL,
+  control = magCompControl(n_samples = 6000, n_burn = 2000,
+    n_chains = 3, n_cores = 3, chain_seeds = 1:3,
+    nb_size = 1000, verbose = FALSE)
+)
+
+summary(varying_fit) |>
+  select(symbol, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(digits = 3)
+```
+
+The fixed `cover` term supplies $\beta_c$, and `cover:gp(height)` supplies
+$c_i v(h_i)$. Together they estimate the slope $\beta_c+v(h)$.
+The process inputs determine where the coefficient varies; the covariate
+before `:` determines what multiplies it in the regression. This is the
+same construction as a [stratum-varying slope](stratum-slopes-plot-sampling.html),
+with a continuous height relationship in place of separate stratum effects.
+
+Again we inspect the combined coefficient, averaged over sampled plots
+within each draw.
+
+```{r}
+#| label: slope-combined-diagnostics
+summary(varying_fit, type = "combined", group = ".all") |>
+  select(coefficient, mean, q2_5, q97_5, rhat, ess) |>
+  knitr::kable(digits = 3)
+```
+
+### Compare true and estimated slopes
+
+We retain predicted effects with `keep_effects = TRUE`, then use
+`samples(..., type = "combined")` to add the fixed slope and process within
+each draw. `cover = 0` supplies the reference cover value needed for response
+prediction; the extracted coefficient is the slope itself, before it is
+multiplied by cover.
+
+```{r}
+#| label: predict-slopes
+slope_grid <- height_grid |>
+  mutate(cover = 0, true_slope = 0.3 - 0.4 * tanh(height))
+
+set.seed(1)
+
+slope_predictions <- predict(varying_fit, slope_grid, type = "magnitude",
+  target = "expected", summary = "samples", n_draws = 200, keep_effects = TRUE)
+
+slope_summary <- summary(samples(slope_predictions, type = "combined")) |>
+  filter(coefficient == "cover") |>
+  mutate(plot_id = as.integer(unit)) |>
+  left_join(slope_grid, by = "plot_id")
+```
+
+```{r}
+#| label: fig-varying-slope
+#| fig-cap: "The canopy-cover slope as a function of standardized canopy height. Blue shows its posterior mean and pointwise 95% credible interval; the black dashed line shows the generating slope. Tick marks locate the sampled canopy heights."
+ggplot(slope_summary, aes(height, mean)) +
+  geom_hline(yintercept = 0, color = "grey70") +
+  geom_ribbon(aes(ymin = q2_5, ymax = q97_5), fill = "#0072B2", alpha = 0.2) +
+  geom_line(color = "#0072B2") +
+  geom_line(aes(y = true_slope), linetype = "dashed") +
+  geom_rug(data = plots, aes(x = height), inherit.aes = FALSE, alpha = 0.3) +
+  labs(x = "Standardized canopy height", y = "Combined cover slope (log-density scale)") +
+  theme_minimal()
+```
+
+The combined slope is the relationship to interpret. The fixed slope and
+random coefficient can compensate for one another, just as intercepts do in
+the stratum and spatial examples.
+
+## Extend the same ideas
+
+`gp(height, cover)` defines a process over two covariates using Euclidean
+distance. Their scales therefore matter; standardize or otherwise scale them
+to express a meaningful distance before fitting. A process with identical
+inputs shares one latent effect across observations. Each observation still
+needs its own `unit` ID to keep its count and area separate. Shared effects
+do not force equal counts or expected densities when other covariates differ.
+
+For larger datasets, `nngp(height, m = 15)` uses the nearest-neighbor
+approximation with neighbors in covariate space. Both forms support the
+same varying-coefficient syntax. These terms describe covariate relationships;
+geographic coordinates would be needed for an additional spatial effect.
+
+Composition models use `factor_gp()` or `factor_nngp()` in the same way.
+For example, a species formula could include
+`species ~ cover + cover:factor_gp(height, K = 1, anchors = "pine")`.
+The shared factor and species loadings then let cover slopes vary with height
+on the probit allocation scale. The
+[conditional DBH article](conditional-dbh-effects-plot-sampling.html) explains
+how factor terms can also enter `dbh_class | species`.
+
+Forest or stand summaries still use posterior predictive density draws and
+area weighting with `standSummary()`, as in the
+[magnitude article](magnitude-plot-sampling.html). The
+[space-time article](space-time-effects-plot-sampling.html) shows how to identify
+separate measurements when plots are revisited and how their effects are shared.

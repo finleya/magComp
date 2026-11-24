@@ -94,6 +94,10 @@ receives a conditional draw. Prediction inherits the fitted covariance family
 and \code{st_scale} for neighbor searches.
 Known spatial locations reuse fitted effects, and
 repeated new coordinates share one sampled spatial effect per term and draw.
+The same rule applies to covariate-space terms such as \code{gp(height)}:
+identical inputs share an effect. Separate units retain their own exposures
+and, with \code{target = "observation"}, their own count draws. Use the same
+input scaling as for fitting.
 Dense-GP prediction draws new effects jointly from their conditional Gaussian
 distribution. NNGP prediction orders new locations by their first coordinate,
 using subsequent coordinates to break ties, and uses neighbors among observed and earlier new locations in the same call.

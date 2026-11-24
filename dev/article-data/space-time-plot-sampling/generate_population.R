@@ -11,13 +11,13 @@ years <- 0:9
 set.seed(1)
 
 # All 151 sites are observed initially. Revisit 25 sites in each later year.
-plot_sites <- locations |> filter(dataset == "plot") |> pull(site_id)
+plot_sites <- locations |> filter(dataset == "plot") |> pull(plot_id)
 visit_order <- sample(plot_sites)
 visits <- bind_rows(
-  tibble(site_id = plot_sites, year = 0),
+  tibble(plot_id = plot_sites, year = 0),
   expand_grid(year = 1:9, visit = 1:25) |>
-    mutate(site_id = visit_order[((year - 1) * 25 + visit - 1) %% 151 + 1]) |>
-    select(site_id, year)
+    mutate(plot_id = visit_order[((year - 1) * 25 + visit - 1) %% 151 + 1]) |>
+    select(plot_id, year)
 )
 
 ## ---- space-time-parameters ----
@@ -53,13 +53,13 @@ w <- L_space %*% Z %*% t(L_time)
 rm(distance, L_space, L_time, Z)
 
 # Keep the sampled visits and the forest grid at the first and last years.
-new_sites <- locations |> filter(dataset == "prediction") |> pull(site_id)
-support <- bind_rows(visits, expand_grid(site_id = new_sites, year = c(0, 9)))
+new_sites <- locations |> filter(dataset == "prediction") |> pull(plot_id)
+support <- bind_rows(visits, expand_grid(plot_id = new_sites, year = c(0, 9)))
 locations <- support |>
-  left_join(locations, by = "site_id") |>
-  mutate(plot_id = row_number(),
-         v = v[cbind(site_id, year + 1)],
-         w = w[cbind(site_id, year + 1)])
+  left_join(locations, by = "plot_id") |>
+  mutate(measurement_id = row_number(),
+         v = v[cbind(plot_id, year + 1)],
+         w = w[cbind(plot_id, year + 1)])
 
 ## ---- space-time-counts ----
 locations <- locations |>

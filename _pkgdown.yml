@@ -31,12 +31,13 @@ articles:
       - articles/composition-plot-sampling
       - articles/dbh-plot-sampling
       - articles/full-model-plot-sampling
-  - title: Group, spatial, and space-time effects
+  - title: Group, spatial, covariate, and space-time effects
     desc: >-
-      These articles extend the full model. Stratum effects
+      These articles introduce additional process terms. Stratum effects
       describe differences among groups of stands, first through intercepts
       and then through canopy-height slopes. Spatial effects describe
-      continuous variation using distance between locations. A further example
+      continuous variation using distance between locations. Covariate processes
+      describe nonlinear relationships and varying slopes. A further example
       adds effects to DBH allocation within species. The space-time article
       combines repeated plot measurements across years. Each uses its own
       simulated population in the same forest and provides the data needed
@@ -45,6 +46,7 @@ articles:
       - articles/stratum-effects-plot-sampling
       - articles/stratum-slopes-plot-sampling
       - articles/spatial-effects-plot-sampling
+      - articles/nonlinear-covariate-effects
       - articles/conditional-dbh-effects-plot-sampling
       - articles/space-time-effects-plot-sampling
   - title: Inventory studies

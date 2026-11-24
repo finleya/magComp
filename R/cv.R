@@ -93,11 +93,21 @@ magcomp_cv_starting <- function(starting, model, train_data)
 {
   subset_term <- function(value, term, field){
     if(is.null(value[[field]])) return(value)
-    levels <- if(term$term_type %in% c("iid", "factor_iid"))
-      unique(as.character(train_data$unit_data[[term$args[1L]]])) else
-      train_data$unit_levels
+    if(term$term_type %in% c("iid", "factor_iid")){
+      levels <- labels <- unique(as.character(train_data$unit_data[[term$args[1L]]]))
+    }else{
+      coords <- as.matrix(train_data$unit_data[,term$coord_names,drop = FALSE])
+      support <- magcomp_process_support(coords, train_data$unit_levels)
+      # A node's first observed unit may be held out while another observation
+      # at the same inputs remains. Match inputs, then use the training labels.
+      both <- rbind(term$coords, support$coords)
+      map <- magcomp_process_support(both, seq_len(nrow(both)))$spatial_group
+      levels <- term$location_levels[map[term$n_group + seq_len(support$n_group)]]
+      labels <- support$location_levels
+    }
     value[[field]] <- if(field == "scores")
       value[[field]][levels,,drop = FALSE] else value[[field]][levels]
+    if(field == "scores") rownames(value[[field]]) <- labels else names(value[[field]]) <- labels
     value
   }
   for(term in model$magnitude$process_terms){

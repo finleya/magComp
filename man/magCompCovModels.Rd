@@ -22,6 +22,9 @@ value as fixed throughout fitting.
 \details{
 Specify a family with \code{cov_model} inside \code{gp()}, \code{nngp()},
 \code{factor_gp()}, or \code{factor_nngp()}. The default is \code{"exp"}.
+Spatial kernels also accept one or more numeric covariates as their inputs;
+\eqn{h} is then Euclidean distance in that covariate space. Scale inputs before
+fitting if needed; the package uses their supplied units.
 For space-time families, the final coordinate is numeric time, for example
 \code{nngp(easting, northing, year, cov_model = "sep_exp", m = 15)}.
 Time gaps are used as supplied. Let \eqn{h} be spatial distance, \eqn{u} absolute

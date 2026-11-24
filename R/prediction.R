@@ -73,7 +73,8 @@ magcomp_prediction_latent <- function(object, newdata, unit_ids)
   terms <- function(x, rows){
     lapply(x, function(t) list(name = t$name, term_type = t$term_type,
                               coef_name = t$coef_name,
-                              group = seq_len(rows)))
+                              group = seq_len(rows),
+                              spatial_group = rep(seq_len(n), length.out = rows)))
   }
   context <- list(
     data = list(unit_data = newdata, unit_levels = unit_ids,

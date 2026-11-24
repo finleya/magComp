@@ -9,13 +9,16 @@ test_that("MCMC controls count total iterations and validate retained draws", {
   expect_error(magCompControl(n_samples = 9, n_burn = 10), "exceed n_burn")
   expect_error(magCompControl(n_samples = 10, n_burn = 9, n_thin = 2),
                "at least one retained")
-  for(name in c("n_samples", "n_burn", "n_thin")){
+  for(name in c("n_samples", "n_burn", "n_thin", "n_chains", "n_cores")){
     for(value in list(NA_real_, Inf, 1.5, numeric(), c(1, 2), "10")){
       args <- list(n_samples = 10, n_burn = 2, n_thin = 1)
       args[[name]] <- value
       expect_error(do.call(magCompControl, args), paste0(name, " must be"))
     }
   }
+  for(value in list(NA_real_, Inf, 1.5, 0, numeric(), c(1, 2), "10"))
+    expect_error(magCompControl(metropolis = list(batch_length = value)),
+                 "batch_length must be a positive integer")
 })
 
 test_that("sampling and post-burn thinning use the requested iteration schedule", {

@@ -27,6 +27,8 @@ magcomp_prepare_covariance <- function(term, coords, label)
     stop("error: unknown cov_model; choose ", paste(names(registry), collapse = ", "))
   term$cov_model <- model
   term$space_time <- registry[[model]]$space_time
+  if(term$space_time && ncol(coords) < 2L)
+    stop("error: ", label, "() space-time covariance requires at least one spatial input and a final time input")
   term$covariance_parameters <- registry[[model]]$parameters
   term$st_scale <- term$params$st_scale %||% 1
   if(!is.numeric(term$st_scale) || length(term$st_scale) != 1L ||

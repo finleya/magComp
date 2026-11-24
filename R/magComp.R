@@ -96,18 +96,19 @@ magcomp_magnitude_residual_start <- function(data, magnitude, starting)
   for(term in valid_terms){
     covariate <- term$covariate %||% rep(1, data$n_unit)
 
-    if(identical(term$term_type, "iid")){
+    if(identical(term$term_type, "iid") || term$n_group < data$n_unit){
       if(is.null(starting$magnitude_process[[term$name]])){
+        group <- if(term$term_type == "iid") term$group else term$spatial_group
         value <- numeric(term$n_group)
         for(g in seq_len(term$n_group)){
-          keep <- term$group == g
+          keep <- group == g
           denom <- sum(covariate[keep]^2)
           if(is.finite(denom) && denom > sqrt(.Machine$double.eps)){
             value[g] <- sum(covariate[keep] * residual_share[keep]) /
               denom
           }
         }
-        names(value) <- term$group_levels
+        names(value) <- if(term$term_type == "iid") term$group_levels else term$location_levels
         starting$magnitude_process[[term$name]] <- value
       }
     }

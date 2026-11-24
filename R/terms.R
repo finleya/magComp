@@ -238,21 +238,20 @@ magcomp_default_process_names <- function(specs)
   out
 }
 
-magcomp_check_spatial_locations <- function(coords, unit_levels, term)
+magcomp_process_support <- function(coords, unit_levels)
 {
-  # Conditional allocation rows repeat a unit for each parent category.
-  # Check locations once per unit, retaining all distinct sampling units.
-  first <- !duplicated(unit_levels)
-  coords <- coords[first,,drop = FALSE]
-  unit_levels <- unit_levels[first]
-  tied <- duplicated(coords) | duplicated(coords, fromLast = TRUE)
-  if(any(tied))
-    stop("error: spatial term '", term$name, "' (", term$term_type,
-         "()) has identical coordinates for different sampling units: ",
-         paste(encodeString(unit_levels[tied], quote = "'"), collapse = ", "),
-         ". Spatial fitting requires distinct coordinates for different ",
-         "sampling units.", call. = FALSE)
-  invisible(NULL)
+  # Exact input matches share a process value. Keep first-occurrence order
+  # so models without ties retain their existing latent ordering.
+  ord <- do.call(order, unname(as.data.frame(coords)))
+  distinct <- c(TRUE, rowSums(coords[ord[-1L],,drop = FALSE] !=
+    coords[ord[-length(ord)],,drop = FALSE]) > 0L)
+  first <- integer(nrow(coords))
+  first[ord] <- ord[distinct][cumsum(distinct)]
+  keep <- sort(unique(first))
+  support <- coords[keep,,drop = FALSE]
+  rownames(support) <- unit_levels[keep]
+  list(coords = support, spatial_group = as.integer(match(first, keep)),
+       location_levels = unit_levels[keep], n_group = length(keep))
 }
 
 magcomp_prepare_process_term <- function(term, data, unit_levels = rownames(data))
@@ -291,8 +290,8 @@ magcomp_prepare_process_term <- function(term, data, unit_levels = rownames(data
 
   if(term$term_type %in% c("nngp", "gp")){
     label <- term$term_type
-    if(length(term$args) < 2L)
-      stop("error: ", label, "() requires at least two coordinate variables")
+    if(length(term$args) < 1L)
+      stop("error: ", label, "() requires at least one input variable")
 
     coord_names <- term$args
     term_names <- coord_names
@@ -316,13 +315,8 @@ magcomp_prepare_process_term <- function(term, data, unit_levels = rownames(data
     storage.mode(coords) <- "double"
     if(anyNA(coords) || any(!is.finite(coords)))
       stop("error: ", label, "() coordinates must be finite")
-    if(nrow(coords) < 2L)
-      stop("error: ", label, "() requires at least two sampling units")
-    magcomp_check_spatial_locations(coords, unit_levels, term)
-
     term$coord_names <- coord_names
-    term$coords <- coords
-    term$location_levels <- rownames(data)
+    term <- utils::modifyList(term, magcomp_process_support(coords, unit_levels))
     if(identical(term$term_type, "nngp")){
       term$m <- as.integer(magcomp_param(term$params, "m") %||% 15L)
       if(length(term$m) != 1L || is.na(term$m) || term$m < 1L)
@@ -330,9 +324,8 @@ magcomp_prepare_process_term <- function(term, data, unit_levels = rownames(data
     }
 
     term <- magcomp_prepare_covariance(term, coords, label)
-    term$n_group <- nrow(coords)
     if(identical(term$term_type, "nngp")){
-      nngp <- magcomp_prepare_nngp_neighbors(magcomp_search_coords(term, coords), term$m)
+      nngp <- magcomp_prepare_nngp_neighbors(magcomp_search_coords(term), term$m)
       term$order <- nngp$order
       term$neighbor_count <- nngp$neighbor_count
       term$neighbor_index <- nngp$neighbor_index
@@ -374,9 +367,8 @@ magcomp_prepare_process_term <- function(term, data, unit_levels = rownames(data
 
   if(term$term_type %in% c("factor_nngp", "factor_gp")){
     label <- term$term_type
-    if(length(term$args) < 2L)
-      stop("error: ", label,
-           "() requires at least two coordinate variables")
+    if(length(term$args) < 1L)
+      stop("error: ", label, "() requires at least one input variable")
 
     coord_names <- term$args
     term_names <- coord_names
@@ -400,13 +392,8 @@ magcomp_prepare_process_term <- function(term, data, unit_levels = rownames(data
     storage.mode(coords) <- "double"
     if(anyNA(coords) || any(!is.finite(coords)))
       stop("error: ", label, "() coordinates must be finite")
-    if(nrow(coords) < 2L)
-      stop("error: ", label, "() requires at least two sampling units")
-    magcomp_check_spatial_locations(coords, unit_levels, term)
-
     term$coord_names <- coord_names
-    term$coords <- coords
-    term$location_levels <- rownames(data)
+    term <- utils::modifyList(term, magcomp_process_support(coords, unit_levels))
     term$K <- magcomp_param(term$params, "K")
     if(identical(term$term_type, "factor_nngp")){
       term$m <- as.integer(magcomp_param(term$params, "m") %||% 15L)
@@ -560,26 +547,8 @@ magcomp_finalize_factor_anchors <- function(term, data, block = NULL,
   term$anchor_index <- anchor_index
   term$anchors <- stick_categories[anchor_index]
   term$factor_names <- factor_names
-  if(term$term_type %in% c("factor_nngp", "factor_gp")){
-    coords_for_process <- term$coords
-    if(!is.null(block) && !is.null(block$unit_index)){
-      first_row <- match(seq_len(data$n_unit), block$unit_index)
-      if(anyNA(first_row)){
-        stop("error: ", term$term_type,
-             "() spatial factor is missing a sampling unit")
-      }
-      coords_for_process <- term$coords[first_row,,drop = FALSE]
-      term$spatial_group <- as.integer(block$unit_index)
-      term$location_levels <- data$unit_levels
-      term$n_group <- data$n_unit
-    }else{
-      term$spatial_group <- seq_len(nrow(term$coords))
-      term$location_levels <- rownames(term$coords)
-      term$n_group <- nrow(term$coords)
-    }
-  }
   if(term$term_type == "factor_nngp"){
-    nngp <- magcomp_prepare_nngp_neighbors(magcomp_search_coords(term, coords_for_process), term$m)
+    nngp <- magcomp_prepare_nngp_neighbors(magcomp_search_coords(term), term$m)
     term$order <- nngp$order
     term$neighbor_count <- nngp$neighbor_count
     term$neighbor_index <- nngp$neighbor_index

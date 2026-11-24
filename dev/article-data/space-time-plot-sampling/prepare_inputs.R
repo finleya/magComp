@@ -13,7 +13,7 @@ prediction <- read_csv("../plot-sampling/data/prediction.csv") |>
   mutate(dataset = "prediction")
 
 locations <- bind_rows(plots, prediction) |>
-  mutate(site_id = row_number(), easting_km = easting / 1000,
+  mutate(plot_id = row_number(), easting_km = easting / 1000,
          northing_km = northing / 1000)
 
 write_csv(locations, "data/locations.csv")

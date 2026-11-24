@@ -122,7 +122,9 @@ We keep $\beta_0=\log(350)$ and $\beta_1=-0.2$, and use magnitude
 standard deviations of 0.5 for intercepts and 0.2 for slopes. Species
 regression coefficients match the preceding articles. We use loadings
 of 0.7 and $-0.5$ for the species intercept term and 0.4 and $-0.3$ for
-the slope term. Size is fixed at 1,000 because magnitude contains random effects.
+the slope term. We fix size at 1,000, following the default for models with
+magnitude random effects. An explicit Gamma prior can instead request size
+estimation, as described in the [stratum-intercept article](stratum-effects-plot-sampling.html).
 
 We draw the four sets of effects once per stratum and use them at all
 observed and prediction units in that stratum. The `true_coefficients`
@@ -248,7 +250,8 @@ parameter_summary |>
                col.names = c("Parameter", "Mean", "2.5%", "97.5%", "R-hat", "ESS"))
 ```
 
-Several fixed coefficients mix slowly, with R-hats up to about 1.24.
+Several fixed coefficients mix slowly; the fixed magnitude slope has an
+R-hat of about 2.07.
 As in the intercept-only extension, a fixed coefficient and its random
 deviations can trade off while leaving their sums nearly unchanged.
 This applies to slopes as well as intercepts. The data inform a stratum's

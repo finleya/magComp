@@ -950,22 +950,7 @@ magcomp_prediction_coords <- function(term, newdata, label)
 
 magcomp_training_process_coords <- function(object, term)
 {
-  coords <- term$coords
-  if(is.null(coords))
-    return(NULL)
-
-  if(!is.null(term$spatial_group) &&
-     length(term$spatial_group) == nrow(coords) &&
-     !is.null(term$n_group) &&
-     term$n_group == object$data$n_unit){
-    first <- match(seq_len(object$data$n_unit), term$spatial_group)
-    if(anyNA(first))
-      stop("error: spatial factor coordinates are missing a sampling unit")
-    coords <- coords[first,,drop = FALSE]
-    rownames(coords) <- object$data$unit_levels
-  }
-
-  coords
+  term$coords
 }
 
 magcomp_exp_distance <- function(a, b)

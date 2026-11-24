@@ -120,20 +120,22 @@ test_that("space-time priors, fixed parameters, labels, and restarts agree", {
   expect_length(fit$backend$magnitude_process_covariance_batch_acceptance$v[[1]], 3)
 })
 
-test_that("revisits require time and exact sampling-unit duplicates remain errors", {
+test_that("persistent and evolving processes use their own unique inputs", {
   data <- covariance_test_data()
-  control <- magCompControl(run_sampler = FALSE)
-  expect_error(magComp(data, magnitude = ~ gp(x, y), composition = NULL, control = control),
-               "identical coordinates")
-  expect_s3_class(magComp(data, magnitude = ~ gp(x, y, year, cov_model = "sep_exp"),
-                          composition = NULL, control = control), "magComp")
+  fit <- magComp(data, magnitude = ~ gp(x, y, name="site") +
+    nngp(x, y, year, cov_model="sep_exp", name="visit"), composition = NULL,
+    control = magCompControl(n_samples=8, n_burn=3, chain_seeds=1, verbose=FALSE))
+  expect_equal(fit$magnitude$process_terms[[1]]$n_group, 8L)
+  expect_equal(fit$magnitude$process_terms[[2]]$n_group, 24L)
+  expect_equal(nrow(samples(fit, type="effects")$magnitude$terms$site$effects), 8L)
   tied <- data$data
   tied$year[tied$plot_id == 9] <- 0
   tied$x[tied$plot_id == 9] <- tied$x[tied$plot_id == 1][1]
   tied$y[tied$plot_id == 9] <- tied$y[tied$plot_id == 1][1]
-  tied <- magCompData(tied, unit = plot_id, category = A, tree_count = count, design = fixedArea(area))
-  expect_error(magComp(tied, magnitude = ~ nngp(x, y, year, cov_model = "sep_exp"),
-                       composition = NULL, control = control), "identical coordinates")
+  tied <- magCompData(tied, unit=plot_id, category=A, tree_count=count, design=fixedArea(area))
+  prepared <- magComp(tied, magnitude=~nngp(x,y,year,cov_model="sep_exp"),
+                     composition=NULL, control=magCompControl(run_sampler=FALSE))
+  expect_equal(prepared$magnitude$process_terms[[1]]$n_group, 23L)
 })
 
 test_that("all space-time kernels fit conditional factors and predict new visits", {

@@ -14,7 +14,10 @@ pointSampling(baf = NULL)
 }
 \arguments{
   \item{data}{Data frame with one row per observed tree or one row per category tally.}
-  \item{unit}{Sampling-unit identifier column, supplied as a bare name or a string.}
+  \item{unit}{Sampling-unit identifier column, supplied as a bare name or a string.
+  Use a distinct ID for each separate measurement, including repeated visits or
+  measurements at identical coordinates. Tree records with the same ID belong
+  to one observation and are combined into its counts.}
   \item{category}{Optional single category column. Omit categories for total-count magnitude-only data.}
   \item{categories}{Optional one- or two-column category specification,
   supplied as \code{c(parent, child)} or \code{c("parent", "child")}. Use this instead of
@@ -79,7 +82,8 @@ zero counts; unused factor levels are retained.
 
 To retain an empty sampling unit, provide a row with \code{tree_count = 0}
 and valid category labels, covariates, and design information. Without a tally
-column, every row counts as one tree.
+column, every row counts as one tree. All-zero count data are supported;
+composition without allocation counts is governed by its priors.
 
 A fixed-area count model requires one common sampling area across all categories
 within each unit. Nested subplots with different areas for different categories

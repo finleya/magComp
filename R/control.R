@@ -13,7 +13,7 @@ magCompControl <- function(n_samples = 2000,
                            verbose = TRUE)
 {
   composition_link <- match.arg(composition_link)
-  for(name in c("n_samples", "n_burn", "n_thin")){
+  for(name in c("n_samples", "n_burn", "n_thin", "n_chains", "n_cores")){
     value <- get(name)
     if(!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
        value != floor(value) || value < (if(name == "n_burn") 0 else 1))
@@ -39,6 +39,10 @@ magCompControl <- function(n_samples = 2000,
          paste(bad_metropolis, collapse = ", "))
   }
   metropolis <- utils::modifyList(metropolis_defaults, metropolis)
+  value <- metropolis$batch_length
+  if(!is.numeric(value) || length(value) != 1L || !is.finite(value) ||
+     value < 1 || value != floor(value) || value >= .Machine$integer.max)
+    stop("error: metropolis$batch_length must be a positive integer")
 
   out <- list(
     n_samples = as.integer(n_samples),
@@ -58,12 +62,6 @@ magCompControl <- function(n_samples = 2000,
     verbose = isTRUE(verbose)
   )
 
-  if(length(out$n_chains) != 1L || is.na(out$n_chains) ||
-     out$n_chains < 1L)
-    stop("error: n_chains must be positive")
-  if(length(out$n_cores) != 1L || is.na(out$n_cores) ||
-     out$n_cores < 1L)
-    stop("error: n_cores must be positive")
   if(!is.null(out$chain_seeds)){
     out$chain_seeds <- as.integer(out$chain_seeds)
     if(length(out$chain_seeds) != out$n_chains ||
@@ -75,11 +73,6 @@ magCompControl <- function(n_samples = 2000,
     stop("error: nb_size must be positive and finite")
   if(!is.finite(out$nb_size_tuning) || out$nb_size_tuning <= 0)
     stop("error: nb_size_tuning must be positive and finite")
-  if(length(out$metropolis$batch_length) != 1L ||
-     is.na(out$metropolis$batch_length) ||
-     out$metropolis$batch_length < 1L){
-    stop("error: metropolis$batch_length must be positive")
-  }
   if(length(out$metropolis$target_accept) != 1L ||
      !is.finite(out$metropolis$target_accept) ||
      out$metropolis$target_accept < 0 ||

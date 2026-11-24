@@ -250,8 +250,9 @@ fit <- magComp(
 
 Each chain contributes 4,000 retained draws after discarding 2,000 burn-in
 iterations. The chains run on separate cores where supported. Negative-binomial
-size is fixed at its generating value, as in the stratum example; magComp
-does not estimate size alongside magnitude random effects.
+size is fixed at its generating value, following the default for models
+with magnitude random effects. An explicit Gamma prior for size overrides
+that default, as described in the [stratum article](stratum-effects-plot-sampling.html).
 
 ## Compare parameters and check the chains
 
@@ -537,6 +538,10 @@ Spatial effects allow information from nearby sampled plots to inform
 predictions within each stand. Stand boundaries determine the areas over
 which we summarize predictions; they do not constrain the spatial processes.
 The same joint prediction draws support both forest and stand summaries.
+
+The [nonlinear-covariate article](nonlinear-covariate-effects.html) uses these
+process terms over canopy height instead of geographic coordinates, including
+a cover slope that varies with height.
 
 The [conditional DBH-effects article](conditional-dbh-effects-plot-sampling.html)
 adds a spatial factor to size allocation within species. It explains how a

@@ -370,9 +370,10 @@ test_that("size defaults follow magnitude terms and settings can be reused", {
     control = magCompControl(nb_size = 20, run_sampler = FALSE))
   expect_null(fixed$config$priors$nb_size)
   expect_equal(subset(magCompSettings(fixed)$parameters, parameter == "size")$initial, "20")
-  expect_error(magComp(dat, magnitude = ~ iid(stand),
+  estimated <- magComp(dat, magnitude = ~ iid(stand),
     priors = magCompPriors(magnitude = list(size = c(1, 0.01))),
-    control = control), "estimating nb_size")
+    control = control)
+  expect_equal(estimated$config$priors$nb_size, c(shape = 1, rate = 0.01))
 })
 
 test_that("sample extraction handles automatic size estimation and several factor terms", {

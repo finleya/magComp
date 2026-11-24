@@ -89,6 +89,13 @@ a final chain dimension to every array. Parameter dimensions and singleton
 dimensions are retained, and dimnames identify coefficients, sticks, groups,
 locations, factors, and chains. Sample positions align across the result.
 
+For fitted GP and NNGP terms, effect and score rows correspond to distinct
+process-input vectors, labeled by the first observation at each vector.
+Repeated inputs share a row. \code{type = "combined"} maps these rows back
+to observations before adding coefficients or averaging within groups.
+Effects retained by \code{predict(..., keep_effects = TRUE)} have one row
+per prediction unit, including repeated inputs.
+
 Fixed size and covariance values are omitted from samples. Fixed covariance
 values are retained by \code{magCompStarting()} for restarting the same model.
 Use \code{\link{magCompSettings}} to inspect these fixed values. Loading arrays retain

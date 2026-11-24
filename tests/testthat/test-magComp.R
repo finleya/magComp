@@ -3231,7 +3231,7 @@ test_that("sampler estimates negative-binomial magnitude size", {
     "unknown setting in starting\\$magnitude: size"
   )
 
-  expect_error(
+  expect_s3_class(
     magComp(
       dat,
       magnitude = ~ z + iid(stand),
@@ -3240,6 +3240,6 @@ test_that("sampler estimates negative-binomial magnitude size", {
                                n_burn = 1,
                                verbose = FALSE)
     ),
-    "estimating nb_size"
+    "magComp"
   )
 })

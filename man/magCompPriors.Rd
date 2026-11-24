@@ -29,9 +29,11 @@ Magnitude prior settings are:
   \item{\code{size}}{The default \code{"auto"} estimates negative-binomial size
   with \code{c(shape = 1, rate = 0.01)} when the magnitude formula has no iid or
   spatial terms; otherwise size is fixed at \code{control$nb_size} (default 1000).
-  Supply a positive Gamma shape-rate pair to change the prior, or \code{NULL}
-  to fix size explicitly. Size estimation is not allowed with magnitude
-  random-effect terms. Composition factor terms do not impose this restriction.}
+  Supply a positive Gamma shape-rate pair to request estimation, including with
+  magnitude random effects, or \code{NULL} to fix size explicitly. Size and
+  process variances can be difficult to distinguish, so assess their joint
+  estimation for the fitted model. Composition factor terms do not affect the
+  automatic size setting.}
   \item{\code{terms}}{List named by formula term names. Each entry can override
   \code{variance} (inverse-gamma shape and scale) and \code{covariance}, a named list of \code{uniform(lower, upper)} priors
   for covariance parameters.}
@@ -90,7 +92,7 @@ A \code{magCompPriors} object to pass as \code{magComp(priors = )}.
 \link{magCompNotation}; the technical guide's Prior distributions section
 in \link{magComp-package}.}
 \examples{
-# Estimate size with a different Gamma prior (no magnitude random effects).
+# Estimate size with an explicit Gamma prior, including with random effects.
 magCompPriors(magnitude = list(size = c(shape = 2, rate = 0.1)))
 # Fix size at the value supplied through magCompControl(nb_size = ...).
 magCompPriors(magnitude = list(size = NULL))

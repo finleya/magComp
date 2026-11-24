@@ -182,55 +182,25 @@ test_that("repeated parent coordinates do not change default decay priors", {
   }
 })
 
-test_that("spatial fitting rejects colocated units but allows repeated unit rows", {
-  rows <- expand.grid(plot = paste0("p", 1:6), species = c("a", "b", "c"),
-                      dbh = c("small", "large"))
-  i <- as.integer(rows$plot)
-  rows$x <- c(0, 0, 1, 2, 2, 3)[i]
-  rows$y <- 0
-  rows$unique_x <- i
-  rows$count <- 2L
-  rows$area <- 1
-  make_data <- function(rows) magCompData(rows, unit = plot,
-    categories = c(species, dbh), tree_count = count,
-    coords = c(unique_x, y), design = fixedArea(area))
-  dat <- make_data(rows)
-  near <- rows
-  near$x <- c(0, 1e-12, 1, 2, 2 + 1e-12, 3)[i]
-  near <- make_data(near)
-  same <- rows
-  same$x <- 0
-  same <- make_data(same)
-
-  for(kind in c("gp", "nngp")) for(component in c("magnitude", "leading", "child")) {
-    for(fixed in FALSE) {
-      term <- paste0(if(component != "magnitude") "factor_" else "", kind,
-        "(x, y, name = 'space'", if(component != "magnitude") ", K = 1" else "",
-        ")")
-      args <- if(component == "magnitude") list(magnitude = as.formula(paste("~", term))) else
-        list(composition = magCompComposition(
-          as.formula(paste("species ~", if(component == "leading") term else "1")),
-          as.formula(paste("dbh | species ~", if(component == "child") term else "1"))))
-      args$control <- magCompControl(run_sampler = FALSE)
-      expect_error(do.call(magComp, c(list(data = dat), args)),
-        "spatial term 'space'.*identical coordinates.*'p1', 'p2', 'p4', 'p5'")
-      if(!fixed) {
-        expect_error(do.call(magComp, c(list(data = same), args)),
-          "spatial term 'space'.*identical coordinates.*'p1', 'p2', 'p3', 'p4', 'p5', 'p6'")
-        # Exact comparisons: close coordinates must not be rounded into ties.
-        # Each accepted unit also has repeated tree/parent-context rows.
-        expect_no_error(do.call(magComp, c(list(data = near), args)))
-      }
-    }
+test_that("each process maps exact input matches and keeps nearby values distinct", {
+  rows <- data.frame(h = c(0, 0, 1, 2, 2, 3), y = 0, z = 1:6,
+                     row.names = paste0("p", 1:6))
+  for(kind in c("gp", "nngp", "factor_gp", "factor_nngp")){
+    formula <- as.formula(paste0("~ z:", kind, "(h, name='height')"))
+    term <- magComp:::magcomp_build_component(formula, rows, "magnitude")$process_terms[[1]]
+    expect_equal(term$spatial_group, c(1L, 1L, 2L, 3L, 3L, 4L))
+    expect_equal(drop(term$coords), c(p1=0, p3=1, p4=2, p6=3))
+    expect_equal(term$location_levels, c("p1", "p3", "p4", "p6"))
+    expect_equal(term$covariate, rows$z)
+    near <- rows
+    near$h[c(2,5)] <- near$h[c(2,5)] + 1e-12
+    near_term <- magComp:::magcomp_build_component(formula, near, "magnitude")$process_terms[[1]]
+    expect_equal(near_term$n_group, 6L)
   }
-  # Check each term's coordinates, not the optional data-level coordinates.
-  expect_error(magComp(dat, magnitude = ~ gp(unique_x, y, name = "valid") +
-    gp(x, y, name = "space"),
-    control = magCompControl(run_sampler = FALSE)), "spatial term 'space'.*identical coordinates")
-  expect_no_error(magComp(dat, magnitude = ~ iid(plot),
-    composition = magCompComposition(species ~ factor_iid(plot, K = 1),
-                                     dbh | species ~ 1),
-    control = magCompControl(run_sampler = FALSE)))
+  model <- magComp:::magcomp_build_component(~ gp(h) + gp(z), rows, "magnitude")
+  expect_equal(vapply(model$process_terms, `[[`, integer(1), "n_group"), c(4L,6L))
+  expect_error(magComp:::magcomp_build_component(~ gp(h, cov_model='sep_exp'),
+                                                rows, "magnitude"), "final time input")
 })
 
 test_that("factor_iid terms carry group indices", {

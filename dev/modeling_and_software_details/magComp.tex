@@ -166,7 +166,8 @@ unit; when categories are present, their counts are summed. A composition-only
 analysis requires category counts but needs no area or BAF for fitting.
 An empty sampling unit must still have a record with \texttt{tree\_count = 0}
 and valid category and unit metadata; a unit absent from the input has no
-likelihood contribution.
+likelihood contribution. All-zero count data are supported; without allocation
+counts, composition is governed by its priors.
 
 For fixed-area stem counts, \(y_{ij}\) is the integer number of trees observed
 in unit \(i\) and category \(j\). The observed total is
@@ -467,7 +468,10 @@ Fixed effects use ordinary R formula syntax. Magnitude effects enter the
 log-density predictor; composition effects enter each allocation block's
 continuation-ratio predictors. The following terms specify random intercepts
 or factor contributions, with \texttt{s1} and \texttt{s2} denoting coordinate
-columns. Additional coordinate columns are allowed.
+columns. A process may instead use one or more numeric covariates, such as
+\texttt{gp(height)} or \texttt{gp(height, cover)}, to describe a nonlinear
+relationship. Distances are calculated in the supplied input space; inputs
+are not automatically standardized.
 
 \begin{center}
 \small
@@ -490,6 +494,21 @@ Prefixing any term with \texttt{x:} multiplies its contribution by covariate
 \texttt{x} separately in the fixed-effect formula when an average fixed slope
 is desired. For example, \texttt{x:iid(group)} gives an iid magnitude slope,
 and \texttt{x:factor\_nngp(s1, s2, K = 2)} gives a spatial composition slope.
+Likewise, \texttt{x + x:gp(height)} gives the coefficient
+\(\beta_x+v(\mathrm{height})\) for \texttt{x}. The combined-coefficient
+option in \texttt{samples()} and \texttt{summary()} summarizes such sums.
+
+For each process term \(t\), identical input vectors share a latent value.
+Let \(G_t\) be the number of distinct inputs and \(g_t(i)\) map observation
+\(i\) to its process node. Equivalently, a matrix \(\bA_t\) with
+\(A_{t,ig}=1\{g_t(i)=g\}\) maps the latent vector to observations. A
+magnitude term contributes \(\bD_t\bA_t\bv_t\), where
+\(\bD_t=\operatorname{diag}(d_{it})\); a composition factor uses the same
+mapping before applying its loadings. The implementation stores integer
+indices rather than constructing \(\bA_t\). Each measurement has its own
+unit ID, count, exposure, and covariates. Observations remain conditionally
+independent given the parameters and effects; sharing a process value does
+not add a separate observation-level correlation model.
 
 Multiple process terms may enter additively. For composition block \(C\),
 let \(\mathcal T_C^u\) and \(\mathcal T_C^w\) denote its iid and spatial
@@ -639,9 +658,10 @@ using the shape-rate convention. The automatic setting
 terms, and otherwise fixes size at \texttt{control\$nb\_size} (default 1000).
 This policy applies to fixed-area and point-sampling models. Composition
 factor terms do not restrict size estimation.
-Its shape and rate can be changed through \texttt{magCompPriors()}.
-An explicit \texttt{size = NULL} fixes size. Joint estimation of size and
-magnitude random-effect terms is not supported.
+An explicit Gamma shape-rate pair in \texttt{magCompPriors()} requests size
+estimation, including with magnitude random effects. Size and process
+variances can be difficult to distinguish, so their joint estimation requires
+assessment for the fitted model. An explicit \texttt{size = NULL} fixes size.
 
 For magnitude iid term \(t\), including an intercept or varying slope,
 \begin{equation}
@@ -659,7 +679,8 @@ For a spatial magnitude random effect,
   \Normal\{\bzero,\sigma_v^2\bR(\phi_v)\},
   \label{eq:spatial-prior}
 \end{equation}
-where \(\bv=(v(\bs_1),\ldots,v(\bs_n))\trans\) and \(\bR(\phi_v)\) is a
+where \(\bv=(v(\bs_1),\ldots,v(\bs_G))\trans\) contains the effects at the
+term's \(G\) distinct inputs and \(\bR(\phi_v)\) is a
 spatial correlation matrix or its NNGP approximation.
 For each magnitude GP or NNGP term, including a varying slope, the variance prior is
 \begin{equation}
@@ -681,9 +702,9 @@ unit-variance parent GP priors for the factor columns,
   k=1,\ldots,K.
   \label{eq:composition-factor-nngp-prior}
 \end{equation}
-Here \(\bw_k=(w_k(\bs_1),\ldots,w_k(\bs_n))\trans\) contains factor \(k\)
-over the observed locations. For \texttt{factor\_nngp()}, this full spatial prior is replaced by the NNGP
-conditional approximation.
+Here \(\bw_k=(w_k(\bs_1),\ldots,w_k(\bs_G))\trans\) contains factor \(k\)
+at the distinct inputs. The NNGP replaces this prior with a conditional
+approximation.
 
 \subsection{Spatial and space-time covariance families}
 \label{sec:covariance-families}
@@ -721,9 +742,10 @@ Actual time gaps enter the covariance. NNGP neighbor search uses
 \texttt{st\_scale} setting defaults to one. This setting affects the directed
 neighbor graph only; correlations always use the original spatial and temporal
 lags. The graph is fixed during sampling, and prediction inherits its search
-scale. Different sampling units must have distinct full coordinate tuples;
-space-time models therefore permit revisits at different dates, but a
-spatial-only term cannot represent those revisits as separate latent nodes.
+scale. Space-time terms share an effect at identical location-time inputs.
+A spatial-only term shares an effect across all visits to the same location.
+Both types can appear in the same model to represent persistent and evolving
+effects. Each term has its own mapping to distinct inputs.
 
 \subsection{Covariance priors and settings}
 
@@ -851,9 +873,10 @@ block, \(j\) indexes a coefficient/loading row. For a leading block these
 are the \(J_A-1\) continuation-ratio rows; for a conditional block they are
 the \(J_A(J_B-1)\) parent--child rows. Let \(\mathcal I_j\) contain the
 data rows governed by coefficient row \(j\). A child data row represents a
-sampling unit and parent context \((i,a)\); its group and spatial indices
-refer back to the original sampling unit. Thus shared factor scores are
-updated using contributions from all their associated parent contexts.
+sampling unit and parent context \((i,a)\); its group and process indices
+refer to the nodes associated with that sampling unit. Thus shared factor
+scores are updated using contributions from all observations and parent
+contexts mapped to them.
 
 Write \(X_{iq}\) for the composition design entry, with \(X_{i0}=1\), and
 \(\btheta_q\) for the coefficient vector over all \(L\) coefficient rows:
@@ -891,11 +914,11 @@ are in spatial order. This conditional construction follows Finley et al. (2019)
 For a spatial vector \(\bv\) with variance \(s^2\), its log prior, up to a
 constant, is
 \begin{equation}
-  G(\bv;\boldsymbol\vartheta,s^2)
-  =-\tfrac12\{n\log s^2+d_{\boldsymbol\vartheta}+s^{-2}\bv\trans\bH_{\boldsymbol\vartheta}\bv\}.
+  \mathcal L_{\mathrm{GP}}(\bv;\boldsymbol\vartheta,s^2)
+  =-\tfrac12\{G\log s^2+d_{\boldsymbol\vartheta}+s^{-2}\bv\trans\bH_{\boldsymbol\vartheta}\bv\}.
   \label{eq:spatial-log-prior}
 \end{equation}
-Use the vector's own number of locations for \(n\). Composition spatial
+Here \(G\) is the vector's number of distinct process inputs. Composition spatial
 factors have \(s^2=1\).
 
 \subsection{Normal draws using Cholesky solves}
@@ -933,7 +956,8 @@ For an NNGP latent vector, the posterior precision has the sparse form
  \bQ_{\mathrm{post}}=s^{-2}\bH_{\boldsymbol\vartheta}+\operatorname{diag}(D_i),
  \label{eq:nngp-posterior-precision}
 \end{equation}
-where \(D_i\) collects the augmented-likelihood weights at location \(i\).
+where \(D_i\) collects the augmented-likelihood weights from all observations
+mapped to process node \(i\).
 It is assembled directly from the neighbor conditionals and likelihood
 contributions. For a sparse precision \(\bQ\),
 \(\mathcal G_S(\bQ,\bb)\) uses CHOLMOD's fill-reducing permutation
@@ -1032,19 +1056,21 @@ excluding that term, but including \(\log e_i-\log r_M\).
 \end{equation}
 Here \(G_t\) is the number of groups. Sample the variance after all effects
 of that term have been updated.
-\item For a GP or NNGP term, jointly update its location vector:
+\item For a GP or NNGP term, accumulate by process node and jointly update
+its \(G_t\)-element latent vector:
 \begin{equation}
  \begin{aligned}
   \bQ_t&=\sigma_{v,t}^{-2}\bH_{\boldsymbol\vartheta_{v,t}}
-           +\operatorname{diag}(\omega_i^{(M)}d_{it}^2),\\
-  b_{ti}&=d_{it}\{\kappa_i^{(M)}-\omega_i^{(M)}o_{it}^{(-)}\},\\
+           +\operatorname{diag}(D_{gt}),\qquad
+  D_{gt}=\sum_{i:g_t(i)=g}\omega_i^{(M)}d_{it}^2,\\
+  b_{tg}&=\sum_{i:g_t(i)=g}d_{it}\{\kappa_i^{(M)}-\omega_i^{(M)}o_{it}^{(-)}\},\\
   \bv_t&\leftarrow
     \begin{cases}
       \mathcal G_D(\bQ_t,\bb_t),&\text{GP},\\
       \mathcal G_S(\bQ_t,\bb_t),&\text{NNGP},
     \end{cases}\\
   \sigma_{v,t}^2\mid\cdot&\sim\operatorname{IG}\left(
-      a_{\sigma,t}+n/2,\ b_{\sigma,t}
+      a_{\sigma,t}+G_t/2,\ b_{\sigma,t}
           +\tfrac12\bv_t\trans\bH_{\boldsymbol\vartheta_{v,t}}\bv_t\right).
  \end{aligned}
  \label{eq:magnitude-spatial-update}
@@ -1132,13 +1158,13 @@ allocation observations associated with group \(g\):
 \end{equation}
 \item For a spatial term, update one complete score column at a time. Let
 \(x_{ij}=d_i\lambda_{jk}\) and
-\(o_{ij}^{(-k)}=\psi_{ij}-x_{ij}w_{g(i),k}\). Accumulate by location:
+\(o_{ij}^{(-k)}=\psi_{ij}-x_{ij}w_{g(i),k}\). Accumulate by process node:
 \begin{equation}
  \begin{aligned}
  D_{gk}&=\sum_{(i,j):g(i)=g}\omega_{ij}x_{ij}^2,\qquad
  b_{gk}=\sum_{(i,j):g(i)=g}x_{ij}
                        \{h_{ij}-\omega_{ij}o_{ij}^{(-k)}\},\\
- \bQ_k&=\bH_{\boldsymbol\zeta_{w,k}}+\operatorname{diag}(D_{gk}),\\
+ \bQ_k&=\bH_{\boldsymbol\vartheta_{w,k}}+\operatorname{diag}(D_{gk}),\\
  \bw_k&\leftarrow
    \begin{cases}
      \mathcal G_D(\bQ_k,\bb_k),&\text{GP},\\
@@ -1166,7 +1192,7 @@ to index these retained posterior draws.
 
 \subsection{Covariance-parameter Metropolis step}
 
-The Gaussian process log density \(G(\bv;\boldsymbol\vartheta,s^2)\) uses the
+The Gaussian process log density \(\mathcal L_{\mathrm{GP}}(\bv;\boldsymbol\vartheta,s^2)\) uses the
 correlation family in Section~\ref{sec:covariance-families}. Form one block of
 estimated covariance parameters per magnitude term and per composition factor.
 Let \(\mathcal I\) index its estimated entries, with uniform supports
@@ -1183,7 +1209,7 @@ Rebuild covariance quantities at \(\boldsymbol\vartheta^\star\) and accept
 with probability
 \begin{equation}
  \min\left[1,\exp\left\{
- G(\bv;\boldsymbol\vartheta^\star,s^2)-G(\bv;\boldsymbol\vartheta,s^2)
+ \mathcal L_{\mathrm{GP}}(\bv;\boldsymbol\vartheta^\star,s^2)-\mathcal L_{\mathrm{GP}}(\bv;\boldsymbol\vartheta,s^2)
  +\sum_{p\in\mathcal I}\log
  \frac{(\vartheta_p^\star-L_p)(U_p-\vartheta_p^\star)}
       {(\vartheta_p-L_p)(U_p-\vartheta_p)}\right\}\right].
@@ -1200,15 +1226,16 @@ latent process vector. A one-parameter block is the scalar special case.
 
 \subsection{Spatial covariance calculations and cost}
 
-The dense GP backend constructs \(\bR_{\boldsymbol\vartheta}\), uses Cholesky to compute its
+For a process term with \(G\) distinct inputs, the dense GP backend
+constructs \(\bR_{\boldsymbol\vartheta}\), uses Cholesky to compute its
 log determinant, and explicitly obtains the \emph{prior} precision.
-This costs \(O(n^3)\) time and \(O(n^2)\) storage.
+This costs \(O(G^3)\) time and \(O(G^2)\) storage.
 The prior precision is cached until an accepted covariance proposal changes it.
-Dense posterior draws also require an \(n\times n\) factorization.
+Dense posterior draws also require a \(G\times G\) factorization.
 
 For NNGP, Equation~\ref{eq:nngp-conditional-parallel} uses Cholesky
 factorization and triangular solves on matrices of size at most
-\(m\times m\). These conditional quantities cost \(O(nm^3)\) to rebuild
+\(m\times m\). These conditional quantities cost \(O(Gm^3)\) to rebuild
 for new covariance parameters. Without forming \(\bH_{\boldsymbol\vartheta}\), compute
 \begin{equation}
  \bv\trans\bH_{\boldsymbol\vartheta}\bv
@@ -1216,8 +1243,8 @@ for new covariance parameters. Without forming \(\bH_{\boldsymbol\vartheta}\), c
  \qquad d_{\boldsymbol\vartheta}=\sum_i\log F_i.
  \label{eq:nngp-quadratic-form}
 \end{equation}
-The quadratic form costs \(O(nm)\); sparse precision assembly costs
-\(O(nm^2)\). Sparse factorization cost depends on graph fill-in.
+The quadratic form costs \(O(Gm)\); sparse precision assembly costs
+\(O(Gm^2)\). Sparse factorization cost depends on graph fill-in.
 The R front end constructs
 a dense distance matrix for spatial defaults and directly scans earlier
 locations for neighbors. Independent chains can run in separate R processes;
@@ -1272,10 +1299,13 @@ specific to their chain and covariance block or size parameter.
 
 \subsection{Data preparation, aggregation, and initialization}
 
-Different sampling units in a spatial term must have distinct coordinate
-vectors. Tree records and child parent-context rows within the same unit
-share its effects. Prediction at repeated coordinates is described in
-Section~\ref{sec:prediction}.
+Process matrices and neighbor graphs are built on distinct input vectors.
+Tree records within one unit are combined into that observation's counts;
+separate units at matching inputs retain separate likelihood contributions.
+The maps described in Section~\ref{sec:model-terms} collect those contributions
+for latent updates without changing the sparse precision pattern. Prediction
+at repeated inputs reuses the same latent draw
+(Section~\ref{sec:prediction}).
 
 An allocation block with only an intercept and no factor terms aggregates
 counts and remaining counts by coefficient row before augmentation. This is

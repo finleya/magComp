@@ -126,8 +126,12 @@ loadings to determine the amount of variation among strata.
 
 For this population, we use $\beta_0=\log(350)$, $\beta_1=-0.2$,
 $\sigma_\delta=0.5$, and $r_M=1000$. The simpler examples used $r_M=50$
-and estimated it during fitting. Here we fix size at its generating value
-because magComp does not estimate it alongside magnitude random effects.
+and estimated it during fitting. Here we fix size at its generating value,
+following the default when magnitude includes random effects. To estimate
+size instead, supply an explicit Gamma prior through
+`magCompPriors(magnitude = list(size = c(shape = 1, rate = 0.01)))`.
+Size and random-effect variance can both explain variation in counts, so
+estimating them together may require more information from the data.
 The species intercepts and slopes match the earlier articles. Loadings of
 0.7 for pine and $-0.5$ for oak
 make a larger factor score favor pine allocation and reduce oak allocation

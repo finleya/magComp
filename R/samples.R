@@ -238,7 +238,7 @@ magcomp_combined_samples <- function(object, raw, meta)
     for(g in seq_along(groups)){
       value <- base
       for(term in selected){
-        index <- if(term$term_type == "iid") term$group[groups[[g]]] else groups[[g]]
+        index <- if(term$term_type == "iid") term$group[groups[[g]]] else term$spatial_group[groups[[g]]]
         value <- value + weighted_effect(magnitude_effects[[term$name]], index)
       }
       add(value, "magnitude", "", coefficient, "", "", g)
@@ -264,7 +264,7 @@ magcomp_combined_samples <- function(object, raw, meta)
           value <- base
           for(term in selected){
             part <- composition_effects[[b]][[term$name]]
-            index <- if(term$term_type == "factor_iid") term$group[rows] else block$unit_index[rows]
+            index <- if(term$term_type == "factor_iid") term$group[rows] else term$spatial_group[rows]
             K <- part$K
             score_rows <- part$scores[index,,drop = FALSE]
             average_scores <- matrix(colMeans(score_rows), nrow = K)

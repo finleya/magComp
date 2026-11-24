@@ -38,9 +38,6 @@ magcomp_resolve_priors <- function(priors, magnitude, composition, starting = li
   if(identical(mag$size, "auto"))
     mag["size"] <- list(if(length(magnitude$process_terms)) NULL else
       c(shape = 1, rate = 0.01))
-  if(!is.null(mag$size) && length(magnitude$process_terms))
-    stop("error: estimating nb_size is currently supported only for ",
-         "magnitude models without random-effect process terms")
   if(any(!vapply(magnitude$process_terms, function(t)
                  t$term_type %in% c("iid", "gp", "nngp"), logical(1L))))
     stop("error: magnitude formulas require iid(), gp(), or nngp() process terms")
@@ -159,7 +156,7 @@ magcomp_start_shapes <- function(data, magnitude, composition)
                                                         colnames(magnitude$X)), terms = list())
   if(!is.null(composition)) out$composition <- list(blocks = list())
   for(term in magnitude$process_terms){
-    levels <- if(term$term_type == "iid") term$group_levels else data$unit_levels
+    levels <- if(term$term_type == "iid") term$group_levels else term$location_levels
     entry <- list(effects = stats::setNames(rep(0, term$n_group), levels), variance = 1)
 
     out$magnitude$terms[[term$name]] <- entry
@@ -344,7 +341,7 @@ magCompSettings <- function(object)
     add("magnitude", "", "", "size", if(is.null(mp$size)) "fixed" else "estimated",
         if(is.null(mp$size)) "" else paste0("Gamma(shape=", mp$size[1L], ", rate=", mp$size[2L], ")"),
         starts$magnitude$size %||% object$control$nb_size,
-        "size estimation requires no magnitude process terms")
+        "an explicit size prior requests estimation; NULL fixes size")
   }
   for(term in object$magnitude$process_terms){
     t <- term$name

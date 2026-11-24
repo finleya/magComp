@@ -25,6 +25,8 @@ community contributions.
 
 - **Regression in each component.** Use different covariates for magnitude,
   category allocation, and conditional allocation within a parent category.
+  GP and NNGP terms can describe nonlinear relationships and coefficients
+  that vary with covariates.
 - **Group, spatial, and space-time effects.** Allow intercepts and slopes
   to vary among groups or across space and time. Spatial terms use Gaussian
   processes or nearest-neighbor Gaussian processes for larger datasets.

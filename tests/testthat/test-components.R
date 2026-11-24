@@ -306,3 +306,50 @@ test_that("point-sampling predictions, PPC, and CV support all component choices
     }
   }
 })
+
+test_that("all-zero magnitude counts have the posterior implied by their likelihood", {
+  rows <- data.frame(id = 1:12, count = 0, area = (1:12)/3)
+  data <- magCompData(rows, unit = id, tree_count = count, design = fixedArea(area))
+  fit <- magComp(data, composition = NULL,
+    priors = magCompPriors(magnitude = list(coefficient_variance = 1, size = NULL)),
+    control = magCompControl(n_samples = 6000, n_burn = 1000, nb_size = 1000,
+                             chain_seeds = 1, verbose = FALSE))
+  beta <- seq(-12, 6, length.out = 4001)
+  log_weight <- vapply(beta, function(b)
+    sum(dnbinom(rows$count, mu = rows$area * exp(b), size = 1000, log = TRUE)), 0.0) +
+    dnorm(beta, log = TRUE)
+  weight <- exp(log_weight - max(log_weight))
+  reference <- sum(beta * weight) / sum(weight)
+  expect_equal(mean(samples(fit)$magnitude$coefficients), reference, tolerance = 0.06)
+  expect_true(all(is.finite(predict(fit, rows)$magnitude)))
+
+  rows$count[1] <- 5
+  data <- magCompData(rows, unit = id, tree_count = count, design = fixedArea(area))
+  cv <- magCompCV(data, composition = NULL,
+    fold_id = setNames(c(1, rep(2, 11)), rows$id),
+    control = magCompControl(n_samples = 8, n_burn = 3, chain_seeds = 1, verbose = FALSE))
+  expect_true(all(is.finite(cv$predictions[[1]]$magnitude)))
+})
+
+test_that("all-zero composition counts leave proper coefficient priors unchanged", {
+  rows <- expand.grid(id = 1:8, A = c("a", "b"), B = c("s", "l"))
+  rows$count <- 0
+  data <- magCompData(rows, unit = id, categories = c(A, B), tree_count = count,
+                      design = fixedArea(0.1))
+  for(link in c("probit", "logit")){
+    fit <- magComp(data, magnitude = NULL,
+      composition = magCompComposition(A ~ 1, B | A ~ 1),
+      priors = magCompPriors(composition = list(intercept_variance = 2)),
+      control = magCompControl(n_samples = 2000, n_burn = 0, chain_seeds = 1,
+                               composition_link = link, verbose = FALSE))
+    for(block in samples(fit)$composition$blocks){
+      draws <- matrix(block$coefficients, ncol = 2000)
+      expect_lt(max(abs(rowMeans(draws))), 0.15)
+      expect_lt(max(abs(apply(draws, 1, var) - 2)), 0.25)
+    }
+    pp <- fitted(fit, target = "observation", type = c("count", "proportion"),
+                  summary = "samples")
+    expect_true(all(pp$count == 0))
+    expect_true(all(is.na(pp$proportion)))
+  }
+})

@@ -14,7 +14,7 @@ build directory.
 
 ```sh
 R CMD build .
-R CMD check --no-manual magComp_0.0.7.tar.gz
+R CMD check --no-manual magComp_0.0.8.tar.gz
 ```
 
 Routine tests are in `tests/testthat/`. Additional numerical comparisons

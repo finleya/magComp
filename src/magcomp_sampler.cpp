@@ -182,7 +182,6 @@ typedef struct {
   std::vector<int> groupIndex;
   std::vector<int> anchorIndex;
   std::vector<double> covariate;
-  std::vector<double> coordStorage;
   double loadingPriorPrec;
   std::vector<double> loading;
   std::vector<double> factorScore;
@@ -1774,7 +1773,6 @@ static void initCompositionFactorState(CompositionFactorState& factor, int n)
   factor.groupIndex.assign(n, 0);
   factor.anchorIndex.clear();
   factor.covariate.assign(n, 1.0);
-  factor.coordStorage.clear();
   factor.loading.clear();
   factor.factorScore.clear();
   factor.coords = NULL;
@@ -1986,20 +1984,30 @@ static void loadMagnitudeProcessTerm(MagnitudeState& mag, SEXP processS)
 
     proc.isSpatial = true;
     proc.denseGp = std::strcmp(termType, "gp") == 0;
-    proc.nGroup = mag.n;
-    proc.effect.assign(mag.n, 0.0);
+    proc.nGroup = getListInteger(termS, "n_group");
+    if(proc.nGroup < 1)
+      magcomp::error("%s() requires at least one process input", termType);
+    SEXP groupS = getListElement(termS, "spatial_group");
+    if(TYPEOF(groupS) != INTSXP || Rf_length(groupS) != mag.n)
+      magcomp::error("%s() process index must have one value per sampling unit", termType);
+    for(int i = 0; i < mag.n; i++){
+      proc.groupIndex[i] = INTEGER(groupS)[i] - 1;
+      if(proc.groupIndex[i] < 0 || proc.groupIndex[i] >= proc.nGroup)
+        magcomp::error("%s() process index is out of range", termType);
+    }
+    proc.effect.assign(proc.nGroup, 0.0);
     if(proc.denseGp){
-      checkArraySize(mag.n, mag.n);
-      proc.gpPrecision.assign(std::max(1, mag.n * mag.n), 0.0);
-      proc.gpPrecisionProposal.assign(std::max(1, mag.n * mag.n), 0.0);
+      checkArraySize(proc.nGroup, proc.nGroup);
+      proc.gpPrecision.assign(std::max(1, proc.nGroup * proc.nGroup), 0.0);
+      proc.gpPrecisionProposal.assign(std::max(1, proc.nGroup * proc.nGroup), 0.0);
     }
 
     SEXP coordsS = getListElement(termS, "coords");
     if(!Rf_isMatrix(coordsS))
       magcomp::error("%s() coordinates must be a matrix", termType);
     SEXP coordsDimS = Rf_getAttrib(coordsS, R_DimSymbol);
-    if(INTEGER(coordsDimS)[0] != mag.n)
-      magcomp::error("%s() coordinates must have one row per sampling unit", termType);
+    if(INTEGER(coordsDimS)[0] != proc.nGroup)
+      magcomp::error("%s() coordinates must have one row per process input", termType);
     proc.coordDim = INTEGER(coordsDimS)[1];
     if(proc.coordDim < 1)
       magcomp::error("%s() coordinate dimension is invalid", termType);
@@ -2019,16 +2027,16 @@ static void loadMagnitudeProcessTerm(MagnitudeState& mag, SEXP processS)
       SEXP neighborDimS = Rf_getAttrib(proc.neighborS, R_DimSymbol);
       if(Rf_length(neighborDimS) != 2)
         magcomp::error("nngp() neighbor_index must be a matrix");
-      if(INTEGER(neighborDimS)[0] != mag.n)
+      if(INTEGER(neighborDimS)[0] != proc.nGroup)
         magcomp::error("nngp() neighbor_index must have one row per ordered location");
       proc.nNeighbor = INTEGER(neighborDimS)[1];
       if(proc.nNeighbor < 0)
         magcomp::error("nngp() neighbor dimension is invalid");
-      proc.nngpB.assign(std::max(1, mag.n * std::max(1, proc.nNeighbor)), 0.0);
-      proc.nngpF.assign(std::max(1, mag.n), 1.0);
-      proc.nngpBProposal.assign(std::max(1, mag.n *
+      proc.nngpB.assign(std::max(1, proc.nGroup * std::max(1, proc.nNeighbor)), 0.0);
+      proc.nngpF.assign(std::max(1, proc.nGroup), 1.0);
+      proc.nngpBProposal.assign(std::max(1, proc.nGroup *
                                          std::max(1, proc.nNeighbor)), 0.0);
-      proc.nngpFProposal.assign(std::max(1, mag.n), 1.0);
+      proc.nngpFProposal.assign(std::max(1, proc.nGroup), 1.0);
     }
 
     proc.varying = !Rf_isNull(covariateS);
@@ -2155,8 +2163,7 @@ static void loadBlockIndex(AllocationBlockState& block,
 }
 
 static void loadAllocationFactorTerms(AllocationBlockState& block,
-                                      SEXP compositionBlockS,
-                                      int nUnit)
+                                      SEXP compositionBlockS)
 {
   if(Rf_isNull(compositionBlockS))
     return;
@@ -2215,43 +2222,22 @@ static void loadAllocationFactorTerms(AllocationBlockState& block,
       if(!Rf_isMatrix(coordsS))
         magcomp::error("%s() coordinates must be a matrix", termType);
       SEXP coordsDimS = Rf_getAttrib(coordsS, R_DimSymbol);
-      if(INTEGER(coordsDimS)[0] != block.n)
-        magcomp::error("%s() coordinates must have one row per allocation row",
-                 termType);
+      factor.nGroup = getListInteger(termS, "n_group");
+      if(factor.nGroup < 1 || INTEGER(coordsDimS)[0] != factor.nGroup)
+        magcomp::error("%s() coordinates must have one row per process input", termType);
       factor.coordDim = INTEGER(coordsDimS)[1];
       if(factor.coordDim < 1)
         magcomp::error("%s() coordinate dimension is invalid", termType);
-      if(nUnit < 1)
-        magcomp::error("%s() requires at least one sampling unit", termType);
-
-      factor.nGroup = nUnit;
-      factor.coordStorage.assign(factor.nGroup * factor.coordDim, NA_REAL);
-      std::vector<int> seen(factor.nGroup, 0);
+      SEXP groupS = getListElement(termS, "spatial_group");
+      if(TYPEOF(groupS) != INTSXP || Rf_length(groupS) != block.n)
+        magcomp::error("%s() process index must have one value per allocation row", termType);
       for(int i = 0; i < block.n; i++){
-        int g = block.unitIndex[i];
+        int g = INTEGER(groupS)[i] - 1;
         if(g < 0 || g >= factor.nGroup)
-          magcomp::error("%s() unit index is out of range", termType);
+          magcomp::error("%s() process index is out of range", termType);
         factor.groupIndex[i] = g;
-        for(int d = 0; d < factor.coordDim; d++){
-          double value = REAL(coordsS)[i + d * block.n];
-          if(!R_FINITE(value))
-            magcomp::error("%s() coordinates must contain finite values", termType);
-          int outIdx = g + d * factor.nGroup;
-          if(!seen[g]){
-            factor.coordStorage[outIdx] = value;
-          }else if(std::fabs(factor.coordStorage[outIdx] - value) >
-                   1.0e-10){
-            magcomp::error("%s() coordinates for repeated sampling units must match",
-                     termType);
-          }
-        }
-        seen[g] = 1;
       }
-      for(int g = 0; g < factor.nGroup; g++){
-        if(!seen[g])
-          magcomp::error("%s() spatial factor is missing a sampling unit", termType);
-      }
-      factor.coords = factor.coordStorage.data();
+      factor.coords = REAL(coordsS);
       if(isNngp){
         factor.nNeighbor = getListInteger(termS, "m");
         if(factor.nNeighbor < 1)
@@ -2350,8 +2336,6 @@ static void loadAllocationFactorTerms(AllocationBlockState& block,
     if(factor.isSpatial)
       block.nSpatialFactor++;
     block.factor.push_back(factor);
-    if(block.factor.back().isSpatial)
-      block.factor.back().coords = block.factor.back().coordStorage.data();
   }
 
   block.nFactor = (int) block.factor.size();
@@ -2360,7 +2344,6 @@ static void loadAllocationFactorTerms(AllocationBlockState& block,
 
 static void loadMagnitudeTotals(MagnitudeState& mag, SEXP yS)
 {
-  int totalY = 0;
   SEXP yDimS = Rf_getAttrib(yS, R_DimSymbol);
   int n = INTEGER(yDimS)[0];
   int J = INTEGER(yDimS)[1];
@@ -2372,29 +2355,20 @@ static void loadMagnitudeTotals(MagnitudeState& mag, SEXP yS)
     for(int i = 0; i < n; i++){
       int y = getMatrixCount(yS, i + j * n);
       mag.total[i] += y;
-      totalY += y;
     }
   }
-
-  if(totalY <= 0)
-    magcomp::error("y must contain at least one observed count");
 }
 
 static void loadAllocationCounts(AllocationBlockState& block, SEXP yS)
 {
-  int totalY = 0;
 
   for(int j = 0; j < block.J; j++){
     for(int i = 0; i < block.n; i++){
       int idx = i + j * block.n;
       int y = getMatrixCount(yS, idx);
       block.count[idx] = y;
-      totalY += y;
     }
   }
-
-  if(totalY <= 0)
-    magcomp::error("y must contain at least one observed count");
 
   for(int i = 0; i < block.n; i++){
     int remaining = 0;
@@ -2647,7 +2621,7 @@ static void initializeAllocationFactor(AllocationBlockState& block,
 static double magnitudeProcessContribution(const MagnitudeProcessState& proc,
                                            int i)
 {
-  int idx = proc.isIid ? proc.groupIndex[i] : i;
+  int idx = proc.groupIndex[i];
   if(idx < 0 || idx >= (int) proc.effect.size())
     magcomp::error("internal error: magnitude process effect index out of range");
 
@@ -2835,35 +2809,36 @@ static void updateMagnitudeSpatialEffect(MagnitudeState& mag,
   if(!proc.isSpatial)
     return;
 
-  for(int i = 0; i < mag.n; i++){
+  for(int i = 0; i < proc.nGroup; i++){
     rhs[i] = 0.0;
     latentDiag[i] = 0.0;
     if(proc.denseGp){
-      for(int h = 0; h < mag.n; h++)
-        Q[i + h * mag.n] = 0.0;
+      for(int h = 0; h < proc.nGroup; h++)
+        Q[i + h * proc.nGroup] = 0.0;
     }
   }
   if(proc.denseGp)
-    addDensePrecision(Q, mag.n, proc.gpPrecision, 1.0 / proc.sigmaSq);
+    addDensePrecision(Q, proc.nGroup, proc.gpPrecision, 1.0 / proc.sigmaSq);
   else if(proc.nngpGraph == NULL)
     magcomp::error("magnitude NNGP graph is not initialized");
 
   for(int i = 0; i < mag.n; i++){
+    int g = proc.groupIndex[i];
     double kappa = 0.5 * ((double) mag.total[i] - nbSize);
     double fixedEta = rowDot(mag.X, mag.coef.data(), mag.n, mag.p, i);
     fixedEta += magnitudeProcessEtaExcept(mag, i, termIndex);
     double x = proc.covariate[i];
 
-    rhs[i] += x * (kappa + mag.omega[i] *
+    rhs[g] += x * (kappa + mag.omega[i] *
                    (logNbSize - std::log(mag.area[i]) - fixedEta));
     if(proc.denseGp)
-      Q[i + i * mag.n] += mag.omega[i] * x * x;
+      Q[g + g * proc.nGroup] += mag.omega[i] * x * x;
     else
-      latentDiag[i] = mag.omega[i] * x * x;
+      latentDiag[g] += mag.omega[i] * x * x;
   }
 
   if(proc.denseGp){
-    sampleGaussianPrecision(draw, Q, rhs, chol, z, mag.n,
+    sampleGaussianPrecision(draw, Q, rhs, chol, z, proc.nGroup,
                             "magnitude GP spatial effect", iter);
   }else{
     assembleSparseNngpPrecision(proc.nngpGraph->sparse,
@@ -2873,21 +2848,21 @@ static void updateMagnitudeSpatialEffect(MagnitudeState& mag,
     sampleSparseGaussianPrecision(proc.nngpGraph->sparse, draw, rhs,
                                   "magnitude NNGP spatial effect", iter);
   }
-  for(int i = 0; i < mag.n; i++)
+  for(int i = 0; i < proc.nGroup; i++)
     proc.effect[i] = draw[i];
 
   double ssq;
   if(proc.denseGp){
-    ssq = denseVectorScaledSsq(proc.effect, mag.n,
+    ssq = denseVectorScaledSsq(proc.effect, proc.nGroup,
                                proc.gpPrecision);
   }else{
-    ssq = nngpVectorScaledSsq(proc.effect, mag.n,
+    ssq = nngpVectorScaledSsq(proc.effect, proc.nGroup,
                               proc.nngpGraph->orderIndex,
                               proc.nngpGraph->neighborCount,
                               proc.nngpGraph->neighborIndex,
                               proc.nngpB, proc.nngpF);
   }
-  proc.sigmaSq = 1.0 / Rf_rgamma(spatialShape + 0.5 * (double) mag.n,
+  proc.sigmaSq = 1.0 / Rf_rgamma(spatialShape + 0.5 * (double) proc.nGroup,
                                  1.0 / (spatialScale + 0.5 * ssq));
   if(!R_FINITE(proc.sigmaSq) || proc.sigmaSq <= 0.0)
     magcomp::error("invalid magnitude spatial sigma_sq draw");
@@ -2900,30 +2875,30 @@ static void updateMagnitudeSpatialEffect(MagnitudeState& mag,
     if(proc.covMetrop.propose(proc.covScale, covarianceProposal, jacobian)){
       double logPostCurrent, logPostProposal;
       if(proc.denseGp){
-        buildGpPrecision(proc.coords, mag.n, proc.coordDim, covarianceProposal,
+        buildGpPrecision(proc.coords, proc.nGroup, proc.coordDim, covarianceProposal,
                          proc.gpPrecisionProposal, &proc.gpLogDetProposal);
-        logPostCurrent = gpVectorLogPrior(proc.effect, mag.n,
+        logPostCurrent = gpVectorLogPrior(proc.effect, proc.nGroup,
                                           proc.gpPrecision,
                                           proc.gpLogDet,
                                           proc.sigmaSq);
-        logPostProposal = gpVectorLogPrior(proc.effect, mag.n,
+        logPostProposal = gpVectorLogPrior(proc.effect, proc.nGroup,
                                            proc.gpPrecisionProposal,
                                            proc.gpLogDetProposal,
                                            proc.sigmaSq);
       }else{
         buildNngpConditionals(
-          proc.coords, mag.n, proc.coordDim, proc.nNeighbor, covarianceProposal,
+          proc.coords, proc.nGroup, proc.coordDim, proc.nNeighbor, covarianceProposal,
           proc.nngpGraph->orderIndex, proc.nngpGraph->neighborCount,
           proc.nngpGraph->neighborIndex, proc.nngpBProposal,
           proc.nngpFProposal, nngpWorkC, nngpWorkRhs, nngpWorkCvec
         );
-        logPostCurrent = nngpVectorLogPrior(proc.effect, mag.n,
+        logPostCurrent = nngpVectorLogPrior(proc.effect, proc.nGroup,
                                               proc.nngpGraph->orderIndex,
                                               proc.nngpGraph->neighborCount,
                                               proc.nngpGraph->neighborIndex,
                                               proc.nngpB, proc.nngpF,
                                               proc.sigmaSq);
-        logPostProposal = nngpVectorLogPrior(proc.effect, mag.n,
+        logPostProposal = nngpVectorLogPrior(proc.effect, proc.nGroup,
                                                proc.nngpGraph->orderIndex,
                                                proc.nngpGraph->neighborCount,
                                                proc.nngpGraph->neighborIndex,
@@ -3662,10 +3637,6 @@ static SEXP runSampler(SEXP config, bool &rngActive)
     loadMagnitudeState(mag, yS, areaS, xMagS);
     loadMagnitudeTotals(mag, yS);
     loadMagnitudeProcessTerm(mag, magnitudeProcessS);
-    if(nb.estimate && !mag.process.empty()){
-      magcomp::error("estimating nb_size is currently supported only for magnitude "
-               "models without random-effect process terms");
-    }
 
     initializeMagnitude(mag, startingS);
     for(int mp = 0; mp < (int) mag.process.size(); mp++){
@@ -3697,7 +3668,7 @@ static SEXP runSampler(SEXP config, bool &rngActive)
     if(b == 0 && blocks[b].n != nUnits)
       magcomp::error("marginal allocation block must have one row per unit");
     loadBlockIndex(blocks[b], allocationBlockS, nUnits);
-    loadAllocationFactorTerms(blocks[b], compositionBlockS, nUnits);
+    loadAllocationFactorTerms(blocks[b], compositionBlockS);
     loadAllocationCounts(blocks[b], blockCountsS);
     configureAllocationAggregation(blocks[b]);
     const char *blockName = NULL;
@@ -3762,7 +3733,7 @@ static SEXP runSampler(SEXP config, bool &rngActive)
   maxDim = mag.p;
   for(int mp = 0; mp < (int) mag.process.size(); mp++){
     if(mag.process[mp].isSpatial)
-      maxDim = std::max(maxDim, nUnits);
+      maxDim = std::max(maxDim, mag.process[mp].nGroup);
   }
   for(int b = 0; b < nBlocks; b++){
     maxDim = std::max(maxDim, blocks[b].coefStick);
@@ -3810,13 +3781,13 @@ static SEXP runSampler(SEXP config, bool &rngActive)
     if(!proc.isSpatial)
       continue;
     if(proc.denseGp){
-      buildGpPrecision(proc.coords, nUnits, proc.coordDim, proc.covMetrop,
+      buildGpPrecision(proc.coords, proc.nGroup, proc.coordDim, proc.covMetrop,
                        proc.gpPrecision, &proc.gpLogDet);
     }else{
       proc.nngpGraph = registerNngpGraphBackend(
-        latentRegistry, proc.name.c_str(), nUnits, proc.nNeighbor,
+        latentRegistry, proc.name.c_str(), proc.nGroup, proc.nNeighbor,
         proc.orderS, proc.neighborCountS, proc.neighborS);
-      buildNngpConditionals(proc.coords, nUnits, proc.coordDim,
+      buildNngpConditionals(proc.coords, proc.nGroup, proc.coordDim,
                             proc.nNeighbor, proc.covMetrop,
                             proc.nngpGraph->orderIndex,
                             proc.nngpGraph->neighborCount,
