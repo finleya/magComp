@@ -23,17 +23,17 @@ data_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)),
 knitr::opts_knit$set(root.dir = data_dir)
 ```
 
-A linear regression need not describe the relationship between tree density
-and canopy height. Gaussian processes can estimate a nonlinear relationship
-by sharing information among similar covariate values. The same machinery
-can let the effect of one covariate vary with another.
+The [magnitude article](magnitude-plot-sampling.html) related log tree density
+to canopy height with a linear regression. Here we allow that relationship
+to be nonlinear, using a Gaussian process to share information among similar
+canopy heights. This uses the same process machinery as the
+[spatial article](spatial-effects-plot-sampling.html), but similarity is
+defined by canopy height rather than geographic distance.
 
-We demonstrate both uses with magnitude-only models. First we estimate a
-nonlinear canopy-height relationship and predict counts at held-out plots.
-Then we let the slope for canopy cover vary with canopy height and compare
-the estimated slope with its known value. Unlike the
-[spatial example](spatial-effects-plot-sampling.html), similarity here is
-defined by covariates rather than geographic distance.
+We first estimate a nonlinear canopy-height relationship and predict counts
+at held-out plots. In a second example, we let the slope for canopy cover
+vary with canopy height. We compare both the estimated slope and the resulting
+density relationships with truth. Both examples use magnitude-only models.
 
 ::: {.alert .alert-info role="note"}
 **Example data**
@@ -124,12 +124,10 @@ the [stratum article](stratum-effects-plot-sampling.html). We use automatic
 priors and starting values for the other parameters.
 
 The separate intercept has an R-hat of about 1.49, whereas those for the
-variance and decay are close to one. The intercept and process can trade off
-while their sum remains well estimated.
-The combined coefficient $\beta_0+v(h_i)$ is the log expected density at each
-height. We inspect its chain diagnostics with the same interface used for
-spatial and stratum effects. This table summarizes the mean combined
-coefficient over sampled plots, calculated separately within each draw.
+variance and decay are close to one. As in the spatial and stratum examples,
+the intercept and random effect can trade off. Their sum $\beta_0+v(h_i)$
+is the log expected density at height $h_i$. We also inspect this combined
+coefficient, averaged over sampled plots within each draw.
 
 ```{r}
 #| label: nonlinear-combined-diagnostics
@@ -138,9 +136,8 @@ summary(fit, type = "combined", group = ".all") |>
   knitr::kable(digits = 3)
 ```
 
-The combined coefficient has an R-hat close to one. We use this sum to
-describe the density relationship; the separate intercept's summary does
-not have the same chain agreement.
+The combined coefficient has an R-hat close to one, supporting its use to
+describe the density relationship despite the separate intercept's slower mixing.
 
 ### Compare the estimated relationship with truth
 
@@ -220,9 +217,12 @@ ggplot(prediction_summary, aes(count, mean)) +
 
 ## Let a slope vary with canopy height
 
-A canopy-cover effect might differ between short and tall stands. We now
-simulate canopy cover between 20% and 90%, standardize it, and generate a second set of counts
-with a height-dependent cover slope. Writing $c_i$ for standardized cover,
+A canopy-cover effect might differ between short and tall stands. The
+[stratum-slope article](stratum-slopes-plot-sampling.html) let a coefficient
+differ among strata; here a coefficient varies continuously with canopy height.
+We reuse the plot areas and heights, simulate canopy cover between 20% and
+90%, and generate new counts for this second example. With $c_i$ denoting
+standardized cover, the generating model is
 
 $$
 \log M_i=\log(350)+0.2h_i+b(h_i)c_i,\qquad
@@ -231,7 +231,9 @@ $$
 
 At fixed height, increasing cover by one standard deviation multiplies
 expected density by $\exp\{b(h)\}$. Cover has a stronger positive association
-with density at shorter canopy heights in this population.
+with density at shorter canopy heights in this population. At average height,
+$b(0)=0.3$, so this increase in cover multiplies density by $\exp(0.3)$,
+about 1.35.
 
 ```{r}
 #| label: simulate-varying-slope
@@ -243,7 +245,21 @@ varying_plots <- plots |>
          true_slope = 0.3 - 0.4 * tanh(height),
          truth = exp(log(350) + 0.2 * height + true_slope * cover),
          count = rnbinom(n(), mu = area * truth, size = 1000))
+```
 
+We fit the model
+
+$$
+\log M_i=\beta_0+\beta_h h_i+\{\beta_c+v(h_i)\}c_i.
+$$
+
+The fixed `cover` term supplies $\beta_c$, and `cover:gp(height)` supplies
+$c_i v(h_i)$. Together they estimate the cover slope $\beta_c+v(h_i)$.
+In `cover:gp(height)`, `height` determines where the coefficient varies,
+and `cover` multiplies that coefficient in the regression.
+
+```{r}
+#| label: fit-varying-slope
 varying_dat <- magCompData(varying_plots, unit = plot_id, tree_count = count,
                            design = fixedArea(area))
 
@@ -261,15 +277,8 @@ summary(varying_fit) |>
   knitr::kable(digits = 3)
 ```
 
-The fixed `cover` term supplies $\beta_c$, and `cover:gp(height)` supplies
-$c_i v(h_i)$. Together they estimate the slope $\beta_c+v(h)$.
-The process inputs determine where the coefficient varies; the covariate
-before `:` determines what multiplies it in the regression. This is the
-same construction as a [stratum-varying slope](stratum-slopes-plot-sampling.html),
-with a continuous height relationship in place of separate stratum effects.
-
-Again we inspect the combined coefficient, averaged over sampled plots
-within each draw.
+As with the intercept above, we inspect the combined cover slope, averaged
+over sampled plots within each draw.
 
 ```{r}
 #| label: slope-combined-diagnostics
@@ -315,9 +324,59 @@ ggplot(slope_summary, aes(height, mean)) +
   theme_minimal()
 ```
 
-The combined slope is the relationship to interpret. The fixed slope and
-random coefficient can compensate for one another, just as intercepts do in
-the stratum and spatial examples.
+The vertical axis is a slope on the log-density scale. Positive values mean
+that greater cover is associated with higher expected density at that height;
+zero means no association, and negative values mean a decrease. The estimated
+slope follows the generating relationship, with greater uncertainty at heights
+poorly represented by the sampled plots.
+
+### Show the resulting density relationships
+
+To see what these slopes imply in trees/ha, we predict expected density at
+low, average, and high cover, defined as one standard deviation below the
+sample mean, the mean itself, and one standard deviation above it. Each row
+of the prediction table is one height--cover combination. Rows at the same
+height share the predicted process effect, which is multiplied by their
+respective cover values.
+
+```{r}
+#| label: predict-cover-relationships
+cover_grid <- expand_grid(height = height_grid$height, cover = c(-1, 0, 1)) |>
+  mutate(plot_id = row_number(),
+         truth = exp(log(350) + 0.2 * height +
+                       (0.3 - 0.4 * tanh(height)) * cover),
+         cover_level = factor(cover, levels = c(-1, 0, 1),
+           labels = c("Low cover (−1 SD)", "Average cover", "High cover (+1 SD)")))
+
+set.seed(1)
+
+cover_predictions <- predict(varying_fit, cover_grid, type = "magnitude",
+  target = "expected", summary = "samples", n_draws = 200)
+
+cover_summary <- summary(cover_predictions) |>
+  mutate(plot_id = as.integer(unit)) |>
+  left_join(cover_grid, by = "plot_id")
+```
+
+```{r}
+#| label: fig-cover-relationships
+#| fig-width: 8
+#| fig-cap: "Expected tree density at three canopy-cover levels. Blue lines and bands show posterior means and pointwise 95% credible intervals; black dashed lines show the generating relationships. All panels use the same axes."
+ggplot(cover_summary, aes(height, mean)) +
+  geom_ribbon(aes(ymin = q2_5, ymax = q97_5), fill = "#0072B2", alpha = 0.2) +
+  geom_line(color = "#0072B2") +
+  geom_line(aes(y = truth), linetype = "dashed") +
+  facet_wrap(~ cover_level, nrow = 1) +
+  labs(x = "Standardized canopy height", y = "Expected density (trees/ha)") +
+  theme_minimal()
+```
+
+At shorter canopy heights, the positive cover slope gives higher densities
+in the high-cover panel. The differences shrink as the cover slope approaches
+zero at taller heights. At average cover, $c_i=0$, so the curve depends only
+on the intercept and linear height term. Its narrower band reflects uncertainty
+in those coefficients; the other panels also include uncertainty in the
+height-dependent cover effect.
 
 ## Extend the same ideas
 
